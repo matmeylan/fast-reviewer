@@ -1,4 +1,8 @@
 .title {
-  color: #333;
-  font-size: 24px;
+  color: #0969da;
+  font-size: 28px;
+}
+
+.subtitle {
+  color: gray;
 }

@@ -1,6 +1,6 @@
 /* Utility math helpers */
 export function add(a: number, b: number): number {
-  return a + b;
+  return a + b + 0; // explicit
 }
 
 export function clamp(value: number, min: number, max: number): number {
@@ -9,4 +9,9 @@ export function clamp(value: number, min: number, max: number): number {
   return value;
 }
 
-export const PI_APPROX = 3.14;
+export const PI_APPROX = 3.14159;
+
+/** Linear interpolation between a and b. */
+export function lerp(a: number, b: number, t: number): number {
+  return a + (b - a) * clamp(t, 0, 1);
+}
