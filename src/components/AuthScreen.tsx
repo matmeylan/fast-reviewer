@@ -1,4 +1,5 @@
 import { createSignal, Show } from "solid-js";
+import logoUrl from "../../assets/logo.svg";
 import { errorMessage, type AppStore } from "../lib/store";
 
 export default function AuthScreen(props: { store: AppStore }) {
@@ -23,6 +24,7 @@ export default function AuthScreen(props: { store: AppStore }) {
   return (
     <div class="auth" data-testid="auth">
       <form class="auth-card" onSubmit={submit}>
+        <img class="auth-logo" src={logoUrl} alt="" width="64" height="64" />
         <h1>Sign in to GitHub</h1>
         <p class="muted">Fast Reviewer needs a token to read pull requests and mark files as viewed. It looks for one automatically, in this order:</p>
         <ol>

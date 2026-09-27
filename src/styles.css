@@ -827,6 +827,11 @@ kbd + kbd {
   -webkit-user-select: text;
 }
 
+.auth-logo {
+  display: block;
+  margin: 0 0 12px;
+}
+
 .auth-card h1 {
   margin: 0 0 8px;
   font-size: 18px;
@@ -889,4 +894,19 @@ kbd + kbd {
   background: var(--bg);
   box-shadow: var(--shadow);
   font-size: 12px;
+}
+
+/* Shown under the picker, which stays open while no PR is loaded. */
+.placeholder.welcome {
+  justify-content: flex-end;
+  padding-bottom: 12vh;
+}
+
+.placeholder.welcome img {
+  -webkit-user-drag: none;
+}
+
+.welcome-title {
+  font-size: 16px;
+  font-weight: 600;
 }
