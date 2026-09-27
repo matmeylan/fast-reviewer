@@ -1,19 +1,20 @@
 /* OWNER: diff-view agent. GitHub-like diff palette, light + dark. */
 .diff-view {
-  --dv-bg: #ffffff;
-  --dv-fg: #1f2328;
-  --dv-ln: #59636e;
-  --dv-border: #d1d9e0;
+  /* Chrome follows the app theme (src/styles.css); add/delete tints stay GitHub-like. */
+  --dv-bg: var(--background);
+  --dv-fg: var(--foreground);
+  --dv-ln: var(--muted-foreground);
+  --dv-border: var(--border);
   --dv-add-bg: #e6ffec;
   --dv-add-ln: #ccffd8;
   --dv-add-x: #abf2bc;
   --dv-del-bg: #ffebe9;
   --dv-del-ln: #ffd7d5;
   --dv-del-x: rgba(255, 129, 130, 0.4);
-  --dv-hunk-bg: #ddf4ff;
-  --dv-hunk-fg: #59636e;
-  --dv-hunk-btn: #b6e3ff;
-  --dv-fill: #f6f8fa;
+  --dv-hunk-bg: color-mix(in oklab, var(--primary) 8%, var(--background));
+  --dv-hunk-fg: var(--muted-foreground);
+  --dv-hunk-btn: color-mix(in oklab, var(--primary) 20%, var(--background));
+  --dv-fill: color-mix(in oklab, var(--muted) 60%, var(--background));
   --dv-add-sign: #1a7f37;
   --dv-del-sign: #d1242f;
 
@@ -33,20 +34,15 @@
 }
 
 .diff-view[data-theme="dark"] {
-  --dv-bg: #0d1117;
-  --dv-fg: #e6edf3;
-  --dv-ln: #7d8590;
-  --dv-border: #30363d;
+  --dv-hunk-bg: color-mix(in oklab, var(--primary) 22%, var(--background));
+  --dv-hunk-btn: color-mix(in oklab, var(--primary) 45%, var(--background));
+  --dv-fill: color-mix(in oklab, var(--muted) 40%, var(--background));
   --dv-add-bg: rgba(46, 160, 67, 0.15);
   --dv-add-ln: rgba(63, 185, 80, 0.3);
   --dv-add-x: rgba(46, 160, 67, 0.5);
   --dv-del-bg: rgba(248, 81, 73, 0.1);
   --dv-del-ln: rgba(248, 81, 73, 0.3);
   --dv-del-x: rgba(248, 81, 73, 0.45);
-  --dv-hunk-bg: rgba(56, 139, 253, 0.1);
-  --dv-hunk-fg: #8d96a0;
-  --dv-hunk-btn: rgba(56, 139, 253, 0.3);
-  --dv-fill: #161b22;
   --dv-add-sign: #3fb950;
   --dv-del-sign: #f85149;
 }

@@ -3,6 +3,16 @@ import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Sh
 import { errorMessage, type AppStore, type PrRef } from "../lib/store";
 import type { PrSummary, RepoSummary } from "../lib/types";
 import { parsePrRef, rankPrs, REASON_LABEL } from "./pickerLogic";
+import ArrowUpRight from "lucide-solid/icons/arrow-up-right";
+import FolderGit2 from "lucide-solid/icons/folder-git-2";
+import ChevronLeft from "lucide-solid/icons/chevron-left";
+import GitPullRequest from "lucide-solid/icons/git-pull-request";
+import GitPullRequestDraft from "lucide-solid/icons/git-pull-request-draft";
+import Search from "lucide-solid/icons/search";
+import { Badge } from "./ui/badge";
+import { DialogContent, DialogOverlay } from "./ui/dialog";
+import { Kbd, KbdGroup } from "./ui/kbd";
+import { Spinner } from "./ui/spinner";
 
 type Item =
   | { kind: "ref"; ref: PrRef }
@@ -191,45 +201,59 @@ export default function Picker(props: { store: AppStore; dismissable: boolean })
       : "Search your PRs, paste a PR URL or owner/repo#123, or type a repo name…";
 
   return (
-    <div
-      class="overlay picker-overlay"
+    <DialogOverlay
       onMouseDown={(e) => {
         if (e.target === e.currentTarget && props.dismissable) s.setOverlay("none");
       }}
     >
-      <div class="picker" role="dialog" aria-label="Open pull request" data-testid="picker">
-        <div class="picker-input">
-          <Show when={repoStage()}>
-            {(r) => (
-              <button class="crumb" onClick={back} title="Back (Esc)">
-                {r().owner}/{r().repo}
-              </button>
-            )}
-          </Show>
-          <input
-            ref={input}
-            value={query()}
-            placeholder={placeholder()}
-            spellcheck={false}
-            autocomplete="off"
-            onInput={(e) => setQuery(e.currentTarget.value)}
-            onKeyDown={onKeyDown}
-            data-testid="picker-input"
-          />
-          <Show when={searching() || s.inbox() === null || (stage().kind === "repo" && repoPrs() === null)}>
-            <div class="spinner small" />
-          </Show>
+      <DialogContent
+        class="flex max-h-[70vh] w-[min(720px,calc(100vw-2rem))] max-w-none flex-col gap-0 overflow-hidden p-0"
+        aria-label="Open pull request"
+        data-testid="picker"
+      >
+        <div class="p-2 pb-0">
+          <div class="flex h-10 items-center gap-2 rounded-lg border border-input/30 bg-input/30 px-3">
+            <Show when={repoStage()} fallback={<Search class="size-4 flex-none opacity-50" />}>
+              {(r) => (
+                <button
+                  class="crumb inline-flex h-6 flex-none items-center gap-0.5 rounded-md bg-primary/10 pr-2 pl-1 text-xs font-medium text-primary hover:bg-primary/15 dark:bg-primary/25 dark:text-foreground"
+                  onClick={back}
+                  title="Back (Esc)"
+                >
+                  <ChevronLeft class="size-3.5" />
+                  {r().owner}/{r().repo}
+                </button>
+              )}
+            </Show>
+            <input
+              ref={input}
+              class="h-full min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+              value={query()}
+              placeholder={placeholder()}
+              spellcheck={false}
+              autocomplete="off"
+              onInput={(e) => setQuery(e.currentTarget.value)}
+              onKeyDown={onKeyDown}
+              data-testid="picker-input"
+            />
+            <Show when={searching() || s.inbox() === null || (stage().kind === "repo" && repoPrs() === null)}>
+              <Spinner />
+            </Show>
+          </div>
         </div>
-        <div class="picker-list" ref={list}>
+        <div class="no-scrollbar min-h-0 overflow-y-auto scroll-py-2 p-2" ref={list}>
           <For each={items()}>
             {(item, i) => (
               <>
                 <Show when={i() === 0 || section(items()[i() - 1]) !== section(item)}>
-                  <div class="picker-section">{section(item)}</div>
+                  <div class="picker-section px-2 pt-2.5 pb-1.5 text-xs font-medium text-muted-foreground first:pt-1">
+                    {section(item)}
+                  </div>
                 </Show>
                 <div
-                  class="picker-item"
+                  class="picker-item group/command-item relative flex cursor-default items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm whitespace-nowrap outline-hidden select-none data-selected:bg-muted data-selected:text-foreground [&_svg:not([class*='size-'])]:size-4"
                   classList={{ active: active() === i() }}
+                  data-selected={active() === i()}
                   data-index={i()}
                   data-testid="picker-item"
                   onMouseMove={() => setActive(i())}
@@ -241,7 +265,7 @@ export default function Picker(props: { store: AppStore; dismissable: boolean })
             )}
           </For>
           <Show when={items().length === 0 && s.inbox() !== null && !searching()}>
-            <div class="picker-empty">
+            <div class="picker-empty py-8 text-center text-sm text-muted-foreground">
               {error() ??
                 (stage().kind === "repo"
                   ? repoPrs() === null
@@ -253,32 +277,37 @@ export default function Picker(props: { store: AppStore; dismissable: boolean })
             </div>
           </Show>
         </div>
-        <div class="picker-footer">
-          <span>
-            <kbd>↑</kbd>
-            <kbd>↓</kbd> navigate
+        <div class="flex items-center gap-4 border-t bg-muted/50 px-4 py-2.5 text-xs text-muted-foreground">
+          <span class="flex items-center gap-1.5">
+            <KbdGroup>
+              <Kbd>↑</Kbd>
+              <Kbd>↓</Kbd>
+            </KbdGroup>
+            navigate
           </span>
-          <span>
-            <kbd>↵</kbd> open
+          <span class="flex items-center gap-1.5">
+            <Kbd>↵</Kbd> open
           </span>
           <Show when={props.dismissable || stage().kind === "repo"}>
-            <span>
-              <kbd>esc</kbd> {stage().kind === "repo" ? "back" : "close"}
+            <span class="flex items-center gap-1.5">
+              <Kbd>esc</Kbd> {stage().kind === "repo" ? "back" : "close"}
             </span>
           </Show>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </DialogOverlay>
   );
 }
+
+const META = "min-w-0 flex-[1_1_0] truncate text-xs text-muted-foreground";
 
 function PickerRow(props: { item: Item }) {
   const it = props.item;
   if (it.kind === "ref") {
     return (
       <>
-        <span class="pi-icon">↗</span>
-        <span class="pi-title">
+        <ArrowUpRight class="flex-none text-muted-foreground" />
+        <span class="pi-title min-w-0 truncate">
           Open {it.ref.owner}/{it.ref.repo}#{it.ref.number}
         </span>
       </>
@@ -287,13 +316,16 @@ function PickerRow(props: { item: Item }) {
   if (it.kind === "repo") {
     return (
       <>
-        <span class="pi-icon">▤</span>
-        <span class="pi-title">
-          {it.repo.owner}/<b>{it.repo.name}</b>
+        <FolderGit2 class="flex-none text-muted-foreground" />
+        <span class="pi-title min-w-0 flex-[0_1_auto] truncate">
+          <span class="text-muted-foreground">{it.repo.owner}/</span>
+          <span class="font-medium">{it.repo.name}</span>
         </span>
-        <span class="pi-meta">{it.repo.description}</span>
+        <span class={META}>{it.repo.description}</span>
         <Show when={it.repo.private}>
-          <span class="badge">private</span>
+          <Badge variant="outline" class="text-muted-foreground">
+            private
+          </Badge>
         </Show>
       </>
     );
@@ -301,15 +333,17 @@ function PickerRow(props: { item: Item }) {
   const pr = it.pr;
   return (
     <>
-      <span class="pi-icon pr-icon" classList={{ draft: pr.isDraft }}>
-        ⑂
-      </span>
-      <span class="pi-title">{pr.title}</span>
-      <span class="pi-meta">
+      {pr.isDraft ? (
+        <GitPullRequestDraft class="flex-none text-muted-foreground" />
+      ) : (
+        <GitPullRequest class="flex-none text-success" />
+      )}
+      <span class="pi-title min-w-0 flex-[0_1_auto] truncate">{pr.title}</span>
+      <span class={META}>
         {pr.owner}/{pr.repo}#{pr.number} · {pr.author} · {timeAgo(pr.updatedAt)}
       </span>
       <Show when={pr.isDraft}>
-        <span class="badge">draft</span>
+        <Badge variant="secondary">draft</Badge>
       </Show>
     </>
   );
