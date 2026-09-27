@@ -1,16 +1,26 @@
-import { createEffect, on, Show } from "solid-js";
+import { createEffect, createSignal, on, Show } from "solid-js";
 import GitBranch from "lucide-solid/icons/git-branch";
 import Search from "lucide-solid/icons/search";
 import TriangleAlert from "lucide-solid/icons/triangle-alert";
-import type { AppStore } from "../lib/store";
-import FileTree from "./FileTree";
+import { storage, type AppStore } from "../lib/store";
+import ListIcon from "lucide-solid/icons/list";
+import ListTree from "lucide-solid/icons/list-tree";
+import FileTree, { type TreeView } from "./FileTree";
+import { Button } from "./ui/button";
 import { InputGroup, InputGroupAddon, inputGroupControlClass } from "./ui/input";
 import { Kbd } from "./ui/kbd";
 import { Progress } from "./ui/progress";
 
-export default function Sidebar(props: { store: AppStore }) {
+const KEY_VIEW = "fr.treeView";
+
+export default function Sidebar(props: { store: AppStore; treeActive?: boolean }) {
   const s = props.store;
   let input!: HTMLInputElement;
+  const [view, setViewSignal] = createSignal<TreeView>(storage.get(KEY_VIEW) === "flat" ? "flat" : "tree");
+  const setView = (v: TreeView) => {
+    setViewSignal(v);
+    storage.set(KEY_VIEW, v);
+  };
 
   createEffect(
     on(
@@ -73,7 +83,7 @@ export default function Sidebar(props: { store: AppStore }) {
           </header>
         )}
       </Show>
-      <div class="px-3 pt-3 pb-2">
+      <div class="flex items-center gap-1.5 px-3 pt-3 pb-2">
         <InputGroup class="bg-background">
           <InputGroupAddon>
             <Search />
@@ -106,8 +116,19 @@ export default function Sidebar(props: { store: AppStore }) {
             <Kbd>/</Kbd>
           </InputGroupAddon>
         </InputGroup>
+        <Button
+          variant="ghost"
+          size="icon"
+          class="flex-none text-muted-foreground"
+          onClick={() => setView(view() === "tree" ? "flat" : "tree")}
+          title={view() === "tree" ? "Show as flat list" : "Group by folder"}
+          aria-label={view() === "tree" ? "Show as flat list" : "Group by folder"}
+          data-testid="tree-view-toggle"
+        >
+          {view() === "tree" ? <ListIcon /> : <ListTree />}
+        </Button>
       </div>
-      <FileTree store={s} />
+      <FileTree store={s} view={view()} active={props.treeActive ?? true} />
     </aside>
   );
 }

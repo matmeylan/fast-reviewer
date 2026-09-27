@@ -48,11 +48,11 @@ test("opens a PR and renders the tree in visual order", async ({ page }) => {
   await openMainPr(page);
   const paths = await page.getByTestId("tree-file").evaluateAll((els) => els.map((e) => e.getAttribute("data-path")));
   expect(paths).toEqual(ORDER);
-  await expect(page.locator(".row.dir").first()).toHaveText(/^api\+\d+−\d+$/);
+  await expect(page.locator(".row.dir").first()).toHaveText(/^api\d+ left$/);
   await expect(page.locator('.row.dir[data-path="packages/shared/src"]')).toContainText("packages/shared/src");
   await expect(page.getByTestId("progress")).toContainText("2/28 viewed");
-  await expect(file(page, "src/components/Table/Table.tsx").locator(".status")).toHaveText("R");
-  await expect(file(page, "api/legacy_auth.py").locator(".status")).toHaveText("D");
+  await expect(file(page, "src/components/Table/Table.tsx")).toHaveAttribute("data-status", "renamed");
+  await expect(file(page, "api/legacy_auth.py")).toHaveAttribute("data-status", "removed");
   // First unviewed file is selected and its diff shown.
   expect(await selectedPath(page)).toBe("api/routes/orders.py");
   await expect(page.getByTestId("current-path")).toHaveText("api/routes/orders.py");
@@ -159,6 +159,37 @@ test("folders collapse and expand", async ({ page }) => {
   await expect(page.getByTestId("tree-file")).toHaveCount(ORDER.length - 13);
   await page.locator('.row.dir[data-path="src"]').click();
   await expect(page.getByTestId("tree-file")).toHaveCount(ORDER.length);
+});
+
+test("folders count the files left to review", async ({ page }) => {
+  await openMainPr(page);
+  const routes = page.locator('.row.dir[data-path="api/routes"]');
+  await expect(routes).toHaveText(/^routes2 left$/);
+  await page.keyboard.press("r");
+  await expect(routes).toHaveText(/^routes1 left$/);
+  await page.keyboard.press("r");
+  await expect(routes.getByLabel("All reviewed")).toBeVisible();
+  await expect(page.locator('.row.dir[data-path="api"]')).toHaveText(/^api4 left$/);
+});
+
+test("flat list keeps the review order, shows folders and is remembered", async ({ page }) => {
+  await openMainPr(page);
+  await page.getByTestId("tree-view-toggle").click();
+  await expect(page.locator(".row.dir")).toHaveCount(0);
+  const paths = await page.getByTestId("tree-file").evaluateAll((els) => els.map((e) => e.getAttribute("data-path")));
+  expect(paths).toEqual(ORDER);
+  await expect(file(page, "src/components/Button.tsx")).toContainText("src/components");
+  await page.reload();
+  await expect(page.getByTestId("tree-file").first()).toBeVisible();
+  await expect(page.locator(".row.dir")).toHaveCount(0);
+  await page.getByTestId("tree-view-toggle").click();
+  await expect(page.locator(".row.dir").first()).toBeVisible();
+});
+
+test("filter matches are highlighted", async ({ page }) => {
+  await openMainPr(page);
+  await page.getByTestId("file-filter").fill("table");
+  await expect(file(page, "src/components/Table/TableRow.tsx").locator("mark")).toHaveText("Table");
 });
 
 test("failed viewed sync rolls back with a toast", async ({ page }) => {

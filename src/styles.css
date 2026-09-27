@@ -80,8 +80,10 @@
   --color-success: var(--success);
   --color-added: var(--added);
   --color-deleted: var(--deleted);
-  --color-modified: var(--modified);
-  --color-renamed: var(--renamed);
+  /* VCS file status, as JetBrains IDEs color file names. */
+  --color-status-added: var(--status-added);
+  --color-status-modified: var(--status-modified);
+  --color-status-deleted: var(--status-deleted);
 }
 
 :root {
@@ -125,8 +127,9 @@
   --success: var(--color-emerald-600);
   --added: var(--color-emerald-600);
   --deleted: var(--color-red-600);
-  --modified: var(--color-amber-600);
-  --renamed: var(--color-violet-600);
+  --status-added: #1e8a3e;
+  --status-modified: #2f6fe0;
+  --status-deleted: #6c707e;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -161,8 +164,10 @@
     --success: var(--color-emerald-500);
     --added: var(--color-emerald-400);
     --deleted: var(--color-red-400);
-    --modified: var(--color-amber-400);
-    --renamed: var(--color-violet-400);
+    /* IntelliJ Islands Dark FILESTATUS_* colors. */
+    --status-added: #73bd79;
+    --status-modified: #70aeff;
+    --status-deleted: #6f737a;
   }
 }
 

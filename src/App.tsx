@@ -21,6 +21,9 @@ const DEFAULT_SIDEBAR = 320;
 /** Actions that make sense to auto-repeat while a key is held. */
 const REPEATABLE = new Set<Action>(["next", "prev", "skip", "nextHunk", "prevHunk"]);
 const isMac = typeof navigator !== "undefined" && /Mac/.test(navigator.platform);
+/** Actions that move within the file list, and ones that work inside the diff. */
+const TREE_ACTIONS = new Set<Action>(["review", "skip", "next", "prev", "toggleViewed", "focusFilter"]);
+const DIFF_ACTIONS = new Set<Action>(["nextHunk", "prevHunk"]);
 
 export default function App(props: { backend?: Backend }) {
   const [store, setStore] = createSignal<AppStore | null>(null);
@@ -46,15 +49,30 @@ function Shell(props: { store: AppStore }) {
   const initial = Number(storage.get(KEY_SIDEBAR));
   const [width, setWidth] = createSignal(initial >= MIN_SIDEBAR ? initial : DEFAULT_SIDEBAR);
 
+  // Like an IDE, the file list shows its selection in the accent color only while
+  // it is the pane being worked in (last clicked, or driven by file shortcuts).
+  const [treeActive, setTreeActive] = createSignal(true);
+
   const onKey = (e: KeyboardEvent) => {
     if (e.isComposing || s.phase() !== "ready") return;
     const action = keyToAction(e, isTypingTarget(e.target));
     if (!action || (e.repeat && !REPEATABLE.has(action))) return;
     e.preventDefault();
+    if (TREE_ACTIONS.has(action)) setTreeActive(true);
+    else if (DIFF_ACTIONS.has(action)) setTreeActive(false);
     s.dispatch(action);
   };
+  const onPointerDown = (e: PointerEvent) => {
+    const target = e.target as Element | null;
+    if (target?.closest?.(".sidebar")) setTreeActive(true);
+    else if (target?.closest?.(".main")) setTreeActive(false);
+  };
   window.addEventListener("keydown", onKey);
-  onCleanup(() => window.removeEventListener("keydown", onKey));
+  window.addEventListener("pointerdown", onPointerDown, true);
+  onCleanup(() => {
+    window.removeEventListener("keydown", onKey);
+    window.removeEventListener("pointerdown", onPointerDown, true);
+  });
 
   function startResize(e: PointerEvent) {
     const handle = e.currentTarget as HTMLElement;
@@ -132,7 +150,7 @@ function Shell(props: { store: AppStore }) {
         </Match>
         <Match when={s.phase() === "ready"}>
           <div class="flex min-h-0 flex-1" style={{ "--sidebar-w": `${width()}px` }}>
-            <Sidebar store={s} />
+            <Sidebar store={s} treeActive={treeActive()} />
             <div
               class="resizer relative z-10 -mx-1 w-2 flex-none cursor-col-resize"
               onPointerDown={startResize}

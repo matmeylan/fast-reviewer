@@ -46,7 +46,7 @@ A native desktop app (macOS first, Linux later) for reviewing GitHub pull reques
 
 ## Layout
 
-- Left: file tree. Folders sorted alphabetically before files, both alphabetical; single-child folder chains are compacted (`src/lib/utils`). Each file shows `+N −M` and a viewed checkmark. Header shows progress (viewed/total).
+- Left: file tree. Folders sorted alphabetically before files, both alphabetical; single-child folder chains are compacted (`src/lib/utils`). Each file shows its IntelliJ file-type icon, its name colored by change status, `+N −M` and a viewed check mark; folders show how many files are left to review. A flat list (file name plus folder path, same order) is one click away. Header shows progress (viewed/total).
 - Right: selected file diff, split (side by side) or unified. Added/removed lines are tinted; the exact changed characters within a modified line get a stronger highlight.
 
 ## Testing
