@@ -52,5 +52,5 @@ A native desktop app (macOS first, Linux later) for reviewing GitHub pull reques
 
 - `cargo test -p fast_reviewer_core` — diff engine, tree/sort, GitHub client against a mock HTTP server (PR loading, REST fallback, auth re-resolution, IPC contract).
 - `pnpm test` — Vitest unit tests (tree building, keyboard reducer, highlighting helpers).
-- `pnpm e2e` — Playwright against the Vite dev server. Outside Tauri, `src/lib/api.ts` uses an in-memory mock backend (`src/lib/mock.ts`), so the full UI can be exercised in a browser. Mock flags: `?mock=unauth`, `?mock=failviewed`, `?mockViewedDelay=<ms>`.
+- `pnpm e2e` — Playwright against the production bundle (`vite build` + `vite preview` on port 1421; the dev server force-reloads pages on a cold dependency cache). Outside Tauri, `src/lib/api.ts` uses an in-memory mock backend (`src/lib/mock.ts`), so the full UI can be exercised in a browser. Mock flags: `?mock=unauth`, `?mock=failviewed`, `?mockViewedDelay=<ms>`.
 - `crates/core/examples/smoke.rs` — read-only timing run against real GitHub. `crates/core/examples/compare_git.rs` — diffs every file of a real PR and compares with `git diff` in a local clone (exits 1 on mismatch). Neither writes to GitHub.
