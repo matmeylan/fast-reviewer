@@ -44,8 +44,36 @@ export interface RowModel {
 const firstNew = (h: Hunk) => (h.newLines > 0 ? h.newStart : h.newStart + 1);
 const firstOld = (h: Hunk) => (h.oldLines > 0 ? h.oldStart : h.oldStart + 1);
 
-export function hunkHeader(h: Hunk): string {
+export function hunkHeader(h: Pick<Hunk, "oldStart" | "oldLines" | "newStart" | "newLines">): string {
   return `@@ -${h.oldStart},${h.oldLines} +${h.newStart},${h.newLines} @@`;
+}
+
+/**
+ * Line ranges shown under one header: its hunk plus any context expanded
+ * around it, and any following hunks merged in once the gap between them is
+ * fully expanded. Sides with no lines keep the hunk's own start (git style).
+ */
+class Section {
+  oldStart = 0;
+  oldLines = 0;
+  newStart = 0;
+  newLines = 0;
+  constructor(
+    readonly row: Extract<Row, { t: "hunk" }>,
+    readonly hunk: Hunk,
+  ) {}
+  add(l: DiffLine) {
+    if (l.oldNo != null && this.oldLines++ === 0) this.oldStart = l.oldNo;
+    if (l.newNo != null && this.newLines++ === 0) this.newStart = l.newNo;
+  }
+  finish() {
+    this.row.header = hunkHeader({
+      oldStart: this.oldLines > 0 ? this.oldStart : this.hunk.oldStart,
+      oldLines: this.oldLines,
+      newStart: this.newLines > 0 ? this.newStart : this.hunk.newStart,
+      newLines: this.newLines,
+    });
+  }
 }
 
 /** Split file text into display lines (no terminators, CRLF-aware, no phantom last line). */
@@ -159,6 +187,9 @@ export function buildRows(
   let maxCols = 0;
   let maxLineNo = 0;
 
+  // Header ranges follow what is visible, so expanding context grows them.
+  let section: Section | null = null;
+
   const pushContext = (gap: Gap, from: number, to: number) => {
     for (let no = from; no < to; no++) {
       const line: DiffLine = {
@@ -168,6 +199,7 @@ export function buildRows(
         text: newLines![no - 1] ?? "",
         segments: null,
       };
+      section?.add(line);
       maxCols = Math.max(maxCols, cols(line.text));
       rows.push(mode === "split" ? { t: "pair", left: line, right: line } : { t: "line", line });
     }
@@ -183,14 +215,17 @@ export function buildRows(
     pushContext(gap, gap.start, gap.start + Math.min(top, size));
     const headerRow = rows.length;
     if (remaining > 0 || (!isLast && size === 0)) {
-      rows.push({
+      const row: Extract<Row, { t: "hunk" }> = {
         t: "hunk",
         gap: i,
         header,
         up: remaining > 0 && !isLast,
         down: remaining > 0 && i !== 0,
         remaining,
-      });
+      };
+      rows.push(row);
+      section?.finish();
+      section = isLast ? null : new Section(row, hunks[i]);
     }
     pushContext(gap, Math.max(gap.start + top, gap.end - bottom), gap.end);
     return headerRow;
@@ -200,6 +235,7 @@ export function buildRows(
     const headerRow = emitGap(i, hunkHeader(h));
     hunkRows.push(rows[headerRow]?.t === "hunk" ? headerRow : rows.length);
     for (const l of h.lines) {
+      section?.add(l);
       maxCols = Math.max(maxCols, cols(l.text));
       maxLineNo = Math.max(maxLineNo, l.oldNo ?? 0, l.newNo ?? 0);
     }
@@ -207,6 +243,7 @@ export function buildRows(
     else for (const line of h.lines) rows.push({ t: "line", line });
   });
   if (hunks.length > 0) emitGap(gaps.length - 1, "");
+  (section as Section | null)?.finish(); // assigned inside emitGap; TS narrows it to null here
 
   const last = gaps[gaps.length - 1];
   maxLineNo = Math.max(maxLineNo, last.end - 1, last.end - 1 + last.delta);

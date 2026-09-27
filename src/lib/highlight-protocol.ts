@@ -27,7 +27,9 @@ export type WorkerRequest =
   | { type: "highlight"; id: number; text: string; lang: string; theme: ThemeName; low?: boolean }
   | { type: "cancel"; id: number }
   /** Promote a queued low-priority request to high priority. */
-  | { type: "bump"; id: number };
+  | { type: "bump"; id: number }
+  /** Preload the theme and these grammars (e.g. every language in a freshly opened PR). */
+  | { type: "warm"; langs: string[]; theme: ThemeName };
 
 export type WorkerResponse =
   /** `done: false` marks a progressive partial result; more messages follow. */

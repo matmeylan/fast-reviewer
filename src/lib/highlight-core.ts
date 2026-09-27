@@ -3,6 +3,7 @@
 import { createHighlighterCore, type HighlighterCore } from "shiki/core";
 import { createJavaScriptRegexEngine } from "shiki/engine/javascript";
 import { bundledLanguages } from "shiki/langs";
+import { warmSample } from "./highlight-samples";
 import { STYLE_FONT_SHIFT, type SideTokens, type ThemeName } from "./highlight-protocol";
 
 const THEME_IDS: Record<ThemeName, string> = { light: "github-light", dark: "github-dark" };
@@ -38,6 +39,12 @@ export interface HighlightCore {
   /** Canonical Shiki language id for `lang`, or null when unsupported. */
   resolveLanguage(lang: string | null): string | null;
   tokenize(text: string, lang: string | null, theme: ThemeName, opts?: TokenizeOptions): Promise<SideTokens | null>;
+  /**
+   * Load the theme and grammars ahead of time and compile each grammar's root
+   * rules on a tiny sample, so the first real tokenize of a language is fast.
+   * Unsupported languages are ignored. `yieldFn` runs between languages.
+   */
+  warm(langs: readonly string[], theme: ThemeName, yieldFn?: () => Promise<void>): Promise<void>;
 }
 
 interface Palette {
@@ -91,8 +98,23 @@ export function createHighlightCore(): HighlightCore {
     return id in bundledLanguages ? id : null;
   };
 
+  const warmed = new Set<string>();
+
   return {
     resolveLanguage,
+    async warm(langs, theme, yieldFn) {
+      const ids = [...new Set(langs.map(resolveLanguage).filter((id): id is string => id !== null))];
+      const [h] = await Promise.all([highlighter(), ensureTheme(theme)]);
+      // Fetch every grammar in parallel, compile them one by one (most important first).
+      const loads = ids.map((id) => ensureLang(id).then(() => true, () => false));
+      for (let i = 0; i < ids.length; i++) {
+        const key = `${theme}\0${ids[i]}`;
+        if (!(await loads[i]) || warmed.has(key)) continue;
+        if (yieldFn) await yieldFn();
+        h.codeToTokensBase(warmSample(ids[i]), { lang: ids[i], theme: THEME_IDS[theme] });
+        warmed.add(key);
+      }
+    },
     async tokenize(text, lang, theme, opts = {}) {
       const id = resolveLanguage(lang);
       if (!id || text.length > MAX_HIGHLIGHT_CHARS) return null;

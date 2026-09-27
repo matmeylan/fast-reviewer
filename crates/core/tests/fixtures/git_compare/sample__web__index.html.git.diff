@@ -1,0 +1,13 @@
+diff --git a/sample/web/index.html b/sample/web/index.html
+index 66fc990..9226cba 100644
+--- a/sample/web/index.html
++++ b/sample/web/index.html
+@@ -2,6 +2,7 @@
+ <html>
+   <head><title>Sample</title><link rel="stylesheet" href="styles.css"></head>
+   <body>
+-    <h1 class="title">Hello</h1>
++    <h1 class="title">Hello reviewer</h1>
++    <p class="subtitle">Fast diffs</p>
+   </body>
+ </html>

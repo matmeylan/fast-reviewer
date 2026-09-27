@@ -94,8 +94,12 @@ describe("DiffView", () => {
       ],
     };
     const { container } = render(() => <DiffView diff={diff} mode="unified" />);
+    const header = () => container.querySelector(".dh .dhh")?.firstChild?.textContent ?? null;
+    expect(header()).toBe("@@ -40,1 +40,1 @@");
     const up = container.querySelector<HTMLButtonElement>('[title="Expand up"]')!;
     up.click();
+    // The header follows the visible range: 20 revealed lines above line 40.
+    expect(header()).toBe("@@ -20,21 +20,21 @@");
     const texts = [...container.querySelectorAll(".dr:not(.dh) .dt")].map((e) => e.textContent);
     expect(texts[0]).toBe("n20");
     expect(texts).toContain("n39");
@@ -103,6 +107,8 @@ describe("DiffView", () => {
     container.querySelector<HTMLButtonElement>('[title="Expand all 19 lines"]')!.click();
     const all = [...container.querySelectorAll(".dr:not(.dh) .dt")].map((e) => e.textContent);
     expect(all[0]).toBe("n1");
+    // Nothing hidden above any more: the header is gone.
+    expect(container.querySelector(".dh .dhh")?.textContent ?? "").not.toContain("@@");
   });
 
   it("virtualizes a 5000-line diff and switches modes quickly", () => {

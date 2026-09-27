@@ -77,6 +77,23 @@ pub struct Service {
     user_repos: Mutex<Option<(Instant, Arc<Vec<RepoSummary>>)>>,
 }
 
+/// GraphQL failures that REST might not share. Auth problems and missing PRs are definitive.
+fn graphql_fallback_ok(e: &Error) -> bool {
+    !matches!(
+        e,
+        Error::NotAuthenticated | Error::Unauthorized | Error::NotFound(_)
+    )
+}
+
+fn warn_rest_fallback(e: &Error) {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        eprintln!(
+            "fast-reviewer: warning: GraphQL unavailable ({e}); using REST for PRs (viewed state unavailable)"
+        );
+    });
+}
+
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
@@ -306,17 +323,36 @@ impl Service {
         number: u64,
     ) -> Result<PrDetail> {
         self.ensure_auth().await?;
-        let (pr, renames) = futures::future::join(
+        let (pr, rest_files) = futures::future::join(
             self.gh.pr_graphql(owner, repo, number),
-            self.gh.pr_renames(owner, repo, number),
+            self.gh.pr_files_rest(owner, repo, number),
         )
         .await;
-        let mut pr = self.on_err(pr).await?;
-        // Rename info is cosmetic for the list but needed for the old side of the diff; tolerate failure.
-        let renames: HashMap<String, String> = renames.unwrap_or_default().into_iter().collect();
-        for f in &mut pr.files {
-            f.previous_path = renames.get(&f.path).cloned();
-        }
+        let mut pr = match pr {
+            Ok(mut pr) => {
+                // Rename info is cosmetic for the list but needed for the old side of the diff;
+                // tolerate failure.
+                let renames: HashMap<String, String> = rest_files
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter_map(|f| Some((f.path, f.previous_path?)))
+                    .collect();
+                for f in &mut pr.files {
+                    f.previous_path = renames.get(&f.path).cloned();
+                }
+                pr
+            }
+            // Some proxies / GHE setups reject GraphQL (e.g. 403 "GraphQL is not available").
+            // REST has everything but the viewed state.
+            Err(e) if graphql_fallback_ok(&e) => {
+                warn_rest_fallback(&e);
+                let meta = self.gh.pr_rest(owner, repo, number).await;
+                let mut pr = self.on_err(meta).await?;
+                pr.files = self.on_err(rest_files).await?;
+                pr
+            }
+            Err(e) => return self.on_err(Err(e)).await,
+        };
         pr.files.sort_unstable_by(|a, b| a.path.cmp(&b.path));
 
         let key: PrKey = (owner.to_owned(), repo.to_owned(), number);

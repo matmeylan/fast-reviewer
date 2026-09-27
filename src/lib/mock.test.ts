@@ -61,4 +61,18 @@ describe("mock backend", () => {
     await expect(b.listInbox()).rejects.toThrow();
     expect((await b.setToken("ghp_abcdef")).login).toBe("octocat");
   });
+
+  it("a slow setFileViewed does not delay getFileDiff (no shared queue)", async () => {
+    const b = createMockBackend({ latencyMs: 1, viewedDelayMs: 500 });
+    const pr = await b.getPr("acme", "web", 482);
+    let viewedDone = false;
+    const write = b.setFileViewed(pr.id, "web/index.html", true).then(() => (viewedDone = true));
+    const t0 = performance.now();
+    const d = await b.getFileDiff("acme", "web", 482, "web/styles.css");
+    expect(d.path).toBe("web/styles.css");
+    expect(viewedDone).toBe(false);
+    expect(performance.now() - t0).toBeLessThan(200);
+    await write;
+  });
 });
+

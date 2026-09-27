@@ -81,4 +81,22 @@ describe("highlight core", () => {
       core.tokenize(src, "javascript", "light", { isCancelled: () => true, yieldFn: async () => {} }),
     ).rejects.toBeInstanceOf(HighlightCancelled);
   });
+
+  it("warm preloads grammars (ignoring unknown ones) so the first tokenize is cheap", async () => {
+    const fresh = createHighlightCore();
+    let yields = 0;
+    await fresh.warm(["tsx", "not-a-language", "python", "tsx", "text"], "dark", async () => {
+      yields++;
+    });
+    expect(yields).toBe(2); // tsx and python, once each
+    const src = "export const A = () => <div className={`x ${y}`}>{z}</div>;\n";
+    const t0 = performance.now();
+    const t = (await fresh.tokenize(src, "tsx", "dark"))!;
+    const ms = performance.now() - t0;
+    expect(tokenLineCount(t)).toBe(2);
+    expect(colorsOf(t).size).toBeGreaterThan(2);
+    // Warming compiled the grammar's common rules; a cold first tokenize takes 100ms+.
+    expect(ms).toBeLessThan(100);
+  });
 });
+

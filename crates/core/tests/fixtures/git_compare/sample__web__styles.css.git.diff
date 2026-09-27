@@ -1,0 +1,15 @@
+diff --git a/sample/web/styles.css b/sample/web/styles.css
+index 1b744ea..692bdfc 100644
+--- a/sample/web/styles.css
++++ b/sample/web/styles.css
+@@ -1,4 +1,8 @@
+ .title {
+-  color: #333;
+-  font-size: 24px;
++  color: #0969da;
++  font-size: 28px;
++}
++
++.subtitle {
++  color: gray;
+ }

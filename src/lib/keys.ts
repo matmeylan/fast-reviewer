@@ -97,6 +97,26 @@ export function nextUnviewed(
   return null;
 }
 
+/**
+ * The next `n` unviewed files after `from`, wrapping around: exactly the files
+ * repeated `r` / `s` presses visit, in that order. `from` itself is excluded.
+ */
+export function upcomingUnviewed(
+  order: readonly string[],
+  from: string | null,
+  isViewed: (path: string) => boolean,
+  n: number,
+): string[] {
+  const len = order.length;
+  const start = from === null ? -1 : order.indexOf(from);
+  const out: string[] = [];
+  for (let i = 1; i <= len && out.length < n; i++) {
+    const p = order[(start + i + len) % len];
+    if (p !== from && !isViewed(p)) out.push(p);
+  }
+  return out;
+}
+
 function step(order: readonly string[], from: string | null, dir: 1 | -1): string | null {
   if (order.length === 0) return null;
   if (from === null) return dir === 1 ? order[0] : order[order.length - 1];

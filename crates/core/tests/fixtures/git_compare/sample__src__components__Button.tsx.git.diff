@@ -1,0 +1,15 @@
+diff --git a/sample/src/components/Button.tsx b/sample/src/components/Button.tsx
+index 2068ff4..3f1c896 100644
+--- a/sample/src/components/Button.tsx
++++ b/sample/src/components/Button.tsx
+@@ -3,8 +3,9 @@ import { JSX } from "solid-js";
+ interface ButtonProps {
+   label: string;
+   onClick: () => void;
++  disabled?: boolean;
+ }
+ 
+ export function Button(props: ButtonProps): JSX.Element {
+-  return <button class="btn" onClick={props.onClick}>{props.label}</button>;
++  return <button class="btn btn-primary" disabled={props.disabled} onClick={props.onClick}>{props.label}</button>;
+ }

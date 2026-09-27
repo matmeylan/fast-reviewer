@@ -235,13 +235,31 @@ impl GitHub {
         pr.ok_or_else(|| Error::NotFound(format!("{owner}/{repo}#{number}")))
     }
 
-    /// `(filename, previous_filename)` for renamed/copied files via REST (GraphQL lacks the old path).
-    pub async fn pr_renames(
+    /// PR metadata via REST (`files` left empty). Used when GraphQL is unavailable.
+    pub async fn pr_rest(&self, owner: &str, repo: &str, number: u64) -> Result<GqlPr> {
+        let path = format!("/repos/{}/{}/pulls/{number}", enc(owner), enc(repo));
+        let p: RestPull = self.get_json(&path, &[]).await?;
+        Ok(GqlPr {
+            id: p.node_id,
+            title: p.title,
+            url: p.html_url,
+            author: p.user,
+            base_ref_name: p.base.git_ref,
+            head_ref_name: p.head.git_ref,
+            base_ref_oid: p.base.sha,
+            head_ref_oid: p.head.sha,
+            files: Vec::new(),
+        })
+    }
+
+    /// All changed files via REST (paginated), including `previous_path` for renames/copies.
+    /// REST cannot see the viewer's viewed state, so `viewed` is always `Unviewed`.
+    pub async fn pr_files_rest(
         &self,
         owner: &str,
         repo: &str,
         number: u64,
-    ) -> Result<Vec<(String, String)>> {
+    ) -> Result<Vec<ChangedFile>> {
         let path = format!("/repos/{}/{}/pulls/{number}/files", enc(owner), enc(repo));
         let per_page = PAGE.to_string();
         let mut out = Vec::new();
@@ -251,11 +269,7 @@ impl GitHub {
                 .get_json(&path, &[("per_page", &per_page), ("page", &p)])
                 .await?;
             let n = files.len();
-            out.extend(
-                files
-                    .into_iter()
-                    .filter_map(|f| Some((f.filename, f.previous_filename?))),
-            );
+            out.extend(files.into_iter().map(RestFile::into_changed));
             if n < PAGE {
                 break;
             }
@@ -450,7 +464,7 @@ struct GqlPrPage {
     files: Option<GqlFiles>,
 }
 
-/// PR metadata plus accumulated files.
+/// PR metadata plus accumulated files (from GraphQL, or from REST via `pr_rest`).
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GqlPr {
@@ -595,6 +609,50 @@ impl Repo {
 struct RestFile {
     filename: String,
     previous_filename: Option<String>,
+    #[serde(default)]
+    status: String,
+    #[serde(default)]
+    additions: u32,
+    #[serde(default)]
+    deletions: u32,
+}
+
+impl RestFile {
+    fn into_changed(self) -> ChangedFile {
+        let status = match self.status.as_str() {
+            "added" => FileStatus::Added,
+            "removed" => FileStatus::Removed,
+            "renamed" => FileStatus::Renamed,
+            "copied" => FileStatus::Copied,
+            "modified" => FileStatus::Modified,
+            _ => FileStatus::Changed,
+        };
+        ChangedFile {
+            path: self.filename,
+            previous_path: self.previous_filename,
+            status,
+            additions: self.additions,
+            deletions: self.deletions,
+            viewed: ViewedState::Unviewed,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct RestPull {
+    node_id: String,
+    title: String,
+    html_url: String,
+    user: Option<Login>,
+    base: RestRef,
+    head: RestRef,
+}
+
+#[derive(Deserialize)]
+struct RestRef {
+    #[serde(rename = "ref")]
+    git_ref: String,
+    sha: String,
 }
 
 #[derive(Deserialize)]

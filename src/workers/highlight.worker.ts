@@ -88,6 +88,16 @@ self.onmessage = (e: MessageEvent<WorkerRequest>) => {
     if (job) high.push(job);
     return;
   }
+  if (msg.type === "warm") {
+    // Let queued visible-file work go first between grammars.
+    void core
+      .warm(msg.langs, msg.theme, async () => {
+        await tick();
+        while (running && high.length > 0) await tick();
+      })
+      .catch(() => {});
+    return;
+  }
   if (msg.type === "cancel") {
     if (take(msg.id)) post({ id: msg.id, ok: false, error: "cancelled", cancelled: true });
     else if (inflight.has(msg.id)) cancelled.add(msg.id);

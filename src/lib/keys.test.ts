@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isTypingTarget, keyToAction, nextUnviewed, reduce, type NavState } from "./keys";
+import { isTypingTarget, keyToAction, nextUnviewed, reduce, upcomingUnviewed, type NavState } from "./keys";
 
 const order = ["a", "b", "c", "d"];
 const state = (over: Partial<NavState> & { viewed?: string[] } = {}): NavState => {
@@ -121,5 +121,28 @@ describe("reduce", () => {
     expect(reduce(state(), "nextHunk").effects).toEqual([{ type: "nextHunk" }]);
     expect(reduce(state(), "prevHunk").effects).toEqual([{ type: "prevHunk" }]);
     expect(reduce(state(), "openBrowser").effects).toEqual([{ type: "openBrowser" }]);
+  });
+});
+
+describe("upcomingUnviewed", () => {
+  const files = ["a", "b", "c", "d", "e", "f"];
+  it("lists the next unviewed files in order, the same ones repeated r visits", () => {
+    const viewed = new Set(["c", "d"]);
+    const isViewed = (p: string) => viewed.has(p);
+    expect(upcomingUnviewed(files, "b", isViewed, 3)).toEqual(["e", "f", "a"]);
+    // Cross-check against r: each press lands on the next entry.
+    let cur = "b";
+    const seen = new Set(viewed);
+    for (const want of upcomingUnviewed(files, "b", isViewed, 3)) {
+      seen.add(cur);
+      const u = reduce({ order: files, current: cur, isViewed: (p) => seen.has(p), mode: "split", overlay: "none", done: false }, "review");
+      expect(u.current).toBe(want);
+      cur = u.current!;
+    }
+  });
+  it("excludes the current file and stops when everything is viewed", () => {
+    expect(upcomingUnviewed(files, "a", (p) => p !== "a", 3)).toEqual([]);
+    expect(upcomingUnviewed(files, null, () => false, 2)).toEqual(["a", "b"]);
+    expect(upcomingUnviewed([], null, () => false, 3)).toEqual([]);
   });
 });

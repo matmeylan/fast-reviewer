@@ -1,0 +1,8 @@
+diff --git a/sample/legacy.js b/sample/legacy.js
+deleted file mode 100644
+index ab90838..0000000
+--- a/sample/legacy.js
++++ /dev/null
+@@ -1,2 +0,0 @@
+-// to be deleted
+-module.exports = function legacy() { return 42; };

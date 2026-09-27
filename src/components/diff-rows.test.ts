@@ -174,4 +174,43 @@ describe("buildRows", () => {
     const d = fileDiff([{ oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: [ctx(1, 1, "\t\tab")] }], null);
     expect(buildRows(d, "unified", emptyExpansion(2), null).maxCols).toBe(10);
   });
+
+  describe("hunk headers follow the visible ranges", () => {
+    const gaps = computeGaps(diff.hunks, lines.length);
+    const headers = (exp: ReturnType<typeof emptyExpansion>, mode: "split" | "unified" = "unified") =>
+      buildRows(diff, mode, exp, lines)
+        .rows.filter((r): r is Extract<Row, { t: "hunk" }> => r.t === "hunk" && r.header !== "")
+        .map((r) => r.header);
+
+    it("keeps the original ranges when nothing is expanded", () => {
+      expect(headers(emptyExpansion(3))).toEqual(["@@ -8,7 +8,6 @@", "@@ -48,6 +47,7 @@"]);
+    });
+
+    it("grows the preceding header when expanding down", () => {
+      const exp = expandGap(gaps, emptyExpansion(3), 1, "down"); // new 14..33 below hunk A
+      expect(headers(exp)).toEqual(["@@ -8,27 +8,26 @@", "@@ -48,6 +47,7 @@"]);
+      expect(headers(exp, "split")).toEqual(headers(exp));
+    });
+
+    it("moves the following header's start when expanding up", () => {
+      const exp = expandGap(gaps, emptyExpansion(3), 1, "up"); // new 27..46 above hunk B (old = new + 1)
+      expect(headers(exp)).toEqual(["@@ -8,7 +8,6 @@", "@@ -28,26 +27,27 @@"]);
+    });
+
+    it("merges hunks under one header once the gap between them is fully expanded", () => {
+      let exp = expandGap(gaps, emptyExpansion(3), 1, "all");
+      expect(headers(exp)).toEqual(["@@ -8,46 +8,46 @@"]);
+      // Trailing context counts too; leading context removes the first header.
+      exp = expandGap(gaps, exp, 2, "down"); // new/old 54..73
+      expect(headers(exp)).toEqual(["@@ -8,66 +8,66 @@"]);
+      exp = expandGap(gaps, exp, 0, "up");
+      expect(headers(exp)).toEqual([]);
+    });
+
+    it("keeps git's start convention for a side with no lines", () => {
+      const added = fileDiff([{ oldStart: 0, oldLines: 0, newStart: 1, newLines: 2, lines: [add(1), add(2)] }], "new1\nnew2\n");
+      const m = buildRows(added, "unified", emptyExpansion(2), splitTextLines(added.newText!));
+      expect(m.rows[0]).toMatchObject({ t: "hunk", header: "@@ -0,0 +1,2 @@" });
+    });
+  });
 });

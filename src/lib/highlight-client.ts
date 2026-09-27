@@ -211,6 +211,30 @@ function lineCount(text: string): number {
   return n;
 }
 
+const warmedLangs = new Set<string>();
+
+/**
+ * Start the worker (if needed) and preload the theme and `langs` grammars so the
+ * first diff of each language highlights without waiting for a grammar to load.
+ * Cheap to call repeatedly: languages already sent are skipped.
+ */
+export function warmHighlighter(langs: readonly (string | null)[] = [], theme: ThemeName = colorScheme()): void {
+  const w = getWorker();
+  if (!w) return;
+  const fresh: string[] = [];
+  for (const l of langs) {
+    if (!l) continue;
+    const key = `${theme}\0${l}`;
+    if (warmedLangs.has(key)) continue;
+    warmedLangs.add(key);
+    fresh.push(l);
+  }
+  const themeKey = `${theme}\0`;
+  if (fresh.length === 0 && warmedLangs.has(themeKey)) return;
+  warmedLangs.add(themeKey);
+  w.postMessage({ type: "warm", langs: fresh, theme } satisfies WorkerRequest);
+}
+
 /** Warm the highlight cache for a diff the user is likely to open next. */
 export function prefetchHighlight(diff: FileDiff, theme: ThemeName = colorScheme()): void {
   highlightDiff(diff, theme, true);

@@ -1,5 +1,6 @@
 // In-memory mock backend used outside Tauri (browser dev, Playwright).
-// Query flags: ?mock=unauth (start signed out), ?mock=failviewed (setFileViewed rejects).
+// Query flags: ?mock=unauth (start signed out), ?mock=failviewed (setFileViewed rejects),
+// ?mockViewedDelay=<ms> (setFileViewed takes that long; other calls are unaffected).
 import type { Backend } from "./api";
 import type {
   AuthStatus,
@@ -804,17 +805,26 @@ export interface MockOptions {
   authenticated?: boolean;
   failViewed?: boolean;
   latencyMs?: number;
+  /** Latency of setFileViewed only (defaults to `latencyMs`), to simulate a slow GitHub write. */
+  viewedDelayMs?: number;
 }
 
 function optionsFromLocation(): MockOptions {
   if (typeof location === "undefined") return {};
-  const flags = new URLSearchParams(location.search).getAll("mock").flatMap((v) => v.split(","));
-  return { authenticated: !flags.includes("unauth"), failViewed: flags.includes("failviewed") };
+  const params = new URLSearchParams(location.search);
+  const flags = params.getAll("mock").flatMap((v) => v.split(","));
+  const delay = Number(params.get("mockViewedDelay"));
+  return {
+    authenticated: !flags.includes("unauth"),
+    failViewed: flags.includes("failviewed"),
+    viewedDelayMs: Number.isFinite(delay) && delay > 0 ? delay : undefined,
+  };
 }
 
 export function createMockBackend(opts: MockOptions = optionsFromLocation()): Backend {
   const latency = opts.latencyMs ?? LATENCY_MS;
-  const wait = <T>(value: () => T): Promise<T> =>
+  // Every call gets its own timer: nothing is serialized, like concurrent Tauri commands.
+  const wait = <T>(value: () => T, ms = latency): Promise<T> =>
     new Promise((resolve, reject) =>
       setTimeout(() => {
         try {
@@ -822,7 +832,7 @@ export function createMockBackend(opts: MockOptions = optionsFromLocation()): Ba
         } catch (e) {
           reject(e);
         }
-      }, latency),
+      }, ms),
     );
 
   let auth: AuthStatus = opts.authenticated === false
@@ -964,7 +974,7 @@ export function createMockBackend(opts: MockOptions = optionsFromLocation()): Ba
         const seen = viewed.get(key)!;
         if (isViewed) seen.add(path);
         else seen.delete(path);
-      }),
+      }, opts.viewedDelayMs ?? latency),
     openUrl: (url) =>
       wait(() => {
         window.open(url, "_blank", "noopener");

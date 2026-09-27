@@ -5,7 +5,9 @@ import { createStore, reconcile } from "solid-js/store";
 import type { Backend } from "./api";
 import type { AuthStatus, FileDiff, PrDetail, PrSummary } from "./types";
 import { buildTree, filterFiles, flattenFiles, isAncestor, type DirNode } from "./tree";
-import { nextUnviewed, reduce, type Action, type Mode, type Overlay } from "./keys";
+import { nextUnviewed, reduce, upcomingUnviewed, type Action, type Mode, type Overlay } from "./keys";
+import { prefetchHighlight, warmHighlighter } from "./highlight-client";
+import { languageForPath, languagesOf } from "./language";
 
 export interface PrRef {
   owner: string;
@@ -27,7 +29,10 @@ export interface Toast {
 }
 
 export const SWAP_DELAY_MS = 80;
-const PREFETCH = 3;
+/** Unviewed files to prefetch ahead of the current one (the next `r` / `s` targets). */
+export const PREFETCH = 3;
+/** Grammars preloaded when a PR opens (most common languages in it first). */
+const WARM_LANGS = 12;
 const TOAST_MS = 4000;
 
 const KEY_MODE = "fr.mode";
@@ -126,13 +131,26 @@ export function createAppStore(backend: Backend) {
     return promise;
   }
 
+  /**
+   * Fetch (and highlight, at low priority) the files the user will most likely
+   * open next: the next PREFETCH unviewed files in tree order, which is exactly
+   * where `r` / `s` go, plus the next file in order for `j`.
+   */
   function prefetchAround(path: string) {
     const o = order();
+    const targets = upcomingUnviewed(o, path, (x) => !!viewed[x], PREFETCH);
     const i = o.indexOf(path);
-    const targets = o.slice(i + 1, i + 1 + PREFETCH);
-    const nu = nextUnviewed(o, path, (x) => !!viewed[x]);
-    if (nu) targets.push(nu);
-    for (const t of targets) fetchDiff(t).catch(() => {});
+    const following = i >= 0 ? o[i + 1] : undefined;
+    if (following && !targets.includes(following)) targets.push(following);
+    const mine = cache;
+    for (const t of targets) {
+      fetchDiff(t).then(
+        (d) => {
+          if (mine === cache) prefetchHighlight(d);
+        },
+        () => {},
+      );
+    }
   }
 
   let selectSeq = 0;
@@ -175,7 +193,11 @@ export function createAppStore(backend: Backend) {
     setViewedCount((c) => c + (value ? 1 : -1));
   }
 
-  /** Optimistic: update now, sync to GitHub in the background, roll back on failure. */
+  /**
+   * Optimistic: update now, sync to GitHub in the background, roll back on failure.
+   * Never awaited: navigation must not wait for GitHub. Each toggle gets a version,
+   * so a late failure of an older toggle cannot undo a newer one.
+   */
   function markViewed(path: string, value: boolean) {
     const p = pr();
     if (!p || !!viewed[path] === value) return;
@@ -224,6 +246,10 @@ export function createAppStore(backend: Backend) {
       });
       storage.set(KEY_LAST_PR, JSON.stringify(ref));
       const first = nextUnviewed(order(), null, (x) => !!viewed[x]) ?? order()[0];
+      // Load the grammars this PR needs while the first diff is on its way (its language first).
+      warmHighlighter(
+        [first ? languageForPath(first) : null, ...languagesOf(detail.files.map((f) => f.path))].slice(0, WARM_LANGS),
+      );
       if (first) select(first);
       return true;
     } catch (e) {

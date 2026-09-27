@@ -1,0 +1,8 @@
+diff --git a/sample/api/routes/health.py b/sample/api/routes/health.py
+new file mode 100644
+index 0000000..834f2a3
+--- /dev/null
++++ b/sample/api/routes/health.py
+@@ -0,0 +1,2 @@
++def health():
++    return {"status": "ok"}
