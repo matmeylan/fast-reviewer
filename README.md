@@ -45,6 +45,19 @@ If you paste a token, use either:
 
 For GitHub Enterprise, set `GITHUB_API_URL` (for example `https://ghe.example.com/api/v3`).
 
+## Download (CI builds)
+
+Every push runs `.github/workflows/ci.yml`: lint and all tests on Linux, plus a universal macOS build (Apple Silicon + Intel).
+
+- **Latest build:** open the repo's *Actions* tab → the latest *CI* run → download the `fast-reviewer-macos` artifact (`.dmg` and a zipped `.app`).
+- **Releases:** push a tag like `v0.1.0` and CI publishes a GitHub Release with the `.dmg` attached.
+
+The app is ad-hoc signed, not notarized, so macOS Gatekeeper blocks it on first launch. After copying it to Applications, run once:
+
+```sh
+xattr -dr com.apple.quarantine "/Applications/Fast Reviewer.app"
+```
+
 ## Development
 
 Prerequisites: Rust (stable), Node 22+ and pnpm. On macOS you also need the Xcode command-line tools. On Linux you need the WebKitGTK 4.1 dev packages (see the [Tauri prerequisites](https://tauri.app/start/prerequisites/)).
