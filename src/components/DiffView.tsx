@@ -49,10 +49,10 @@ export default function DiffView(props: DiffViewProps) {
   return (
     <Switch fallback={<DiffBody {...props} />}>
       <Match when={props.diff.binary}>
-        <div class="diff-view diff-empty" data-theme={props.theme ?? colorScheme()}>Binary file not shown</div>
+        <div class="diff-view diff-empty" data-theme={props.theme ?? colorScheme()} data-path={props.diff.path}>Binary file not shown</div>
       </Match>
       <Match when={props.diff.tooLarge}>
-        <div class="diff-view diff-empty" data-theme={props.theme ?? colorScheme()}>
+        <div class="diff-view diff-empty" data-theme={props.theme ?? colorScheme()} data-path={props.diff.path}>
           File too large to display
           <Show when={props.stats}>
             {(s) => (
@@ -64,7 +64,7 @@ export default function DiffView(props: DiffViewProps) {
         </div>
       </Match>
       <Match when={props.diff.hunks.length === 0}>
-        <div class="diff-view diff-empty" data-theme={props.theme ?? colorScheme()}>
+        <div class="diff-view diff-empty" data-theme={props.theme ?? colorScheme()} data-path={props.diff.path}>
           {props.diff.oldPath && props.diff.oldPath !== props.diff.path
             ? "File renamed without changes"
             : "No changes"}
@@ -296,6 +296,7 @@ function DiffBody(props: DiffViewProps) {
       class="diff-view"
       classList={{ split: props.mode === "split", unified: props.mode !== "split" }}
       data-theme={theme()}
+      data-path={props.diff.path}
       style={{ "--gw": `${gutterCh()}ch`, "--sx": `${scrollX()}px` }}
     >
       <style>{palette()}</style>

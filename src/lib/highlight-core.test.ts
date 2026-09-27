@@ -69,7 +69,7 @@ describe("highlight core", () => {
     const src = Array.from({ length: 1500 }, (_, i) => `let a${i} = "s";`).join("\n");
     const partials: SideTokens[] = [];
     const t = (await core.tokenize(src, "javascript", "light", { onProgress: (p) => partials.push(p) }))!;
-    expect(partials.map((p) => p.ready)).toEqual([200, 1200]);
+    expect(partials.map((p) => p.ready)).toEqual([200, 700, 1200]);
     expect(lineTokens(partials[0], 199)).toEqual(lineTokens(t, 199));
     expect(lineTokens(partials[0], 200)).toBeNull();
     expect(t.ready).toBeUndefined();

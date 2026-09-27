@@ -200,3 +200,18 @@ test("2400-file PR stays virtualized and navigable", async ({ page }) => {
   expect(Date.now() - t0).toBeLessThan(5000);
   expect(await selectedPath(page)).not.toBe(first);
 });
+
+test("diff shows syntax colors and intra-line highlights", async ({ page }) => {
+  await openMainPr(page);
+  await file(page, "src/components/Button.tsx").click();
+  const view = page.locator('.diff-view[data-path="src/components/Button.tsx"]');
+  await expect(view).toBeVisible();
+  // Shiki token spans arrive from the worker; changed-character marks come with the diff.
+  await expect.poll(() => view.locator(".dt span[class*='k']").count()).toBeGreaterThan(20);
+  expect(await view.locator(".dc.del .dt span.x").count()).toBeGreaterThan(0);
+  expect(await view.locator(".dc.add .dt span.x").count()).toBeGreaterThan(0);
+  const colors = await view.locator(".dt span[class*='k']").evaluateAll(
+    (els) => new Set(els.map((e) => getComputedStyle(e).color)).size,
+  );
+  expect(colors).toBeGreaterThan(3);
+});

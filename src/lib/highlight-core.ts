@@ -13,7 +13,7 @@ const THEME_LOADERS: Record<ThemeName, () => Promise<{ default: unknown }>> = {
 
 /** Lines per tokenization chunk; the grammar state is carried across chunks. The first is small for a fast first result. */
 const FIRST_CHUNK_LINES = 200;
-const CHUNK_LINES = 1000;
+const CHUNK_LINES = 500;
 /** Skip highlighting for texts larger than this (UTF-16 units). */
 export const MAX_HIGHLIGHT_CHARS = 4_000_000;
 

@@ -1,0 +1,73 @@
+{
+  "authStatus": { "authenticated": true, "login": "octocat", "source": "ghCli" },
+  "repoSummary": {
+    "owner": "octo",
+    "name": "app",
+    "description": null,
+    "private": true,
+    "updatedAt": "2026-01-02T03:04:05Z"
+  },
+  "prSummary": {
+    "owner": "octo",
+    "repo": "app",
+    "number": 42,
+    "title": "Speed up the thing",
+    "author": "hubot",
+    "url": "https://github.com/octo/app/pull/42",
+    "isDraft": false,
+    "updatedAt": "2026-01-02T03:04:05Z",
+    "reason": "reviewRequested"
+  },
+  "prDetail": {
+    "id": "PR_kwDOAbc",
+    "owner": "octo",
+    "repo": "app",
+    "number": 42,
+    "title": "Speed up the thing",
+    "author": "hubot",
+    "url": "https://github.com/octo/app/pull/42",
+    "baseRef": "main",
+    "headRef": "fast",
+    "baseSha": "aaaaaaa",
+    "headSha": "bbbbbbb",
+    "files": [
+      {
+        "path": "src/new.ts",
+        "previousPath": "src/old.ts",
+        "status": "renamed",
+        "additions": 3,
+        "deletions": 1,
+        "viewed": "VIEWED"
+      }
+    ]
+  },
+  "fileDiff": {
+    "path": "src/new.ts",
+    "oldPath": "src/old.ts",
+    "language": "typescript",
+    "binary": false,
+    "tooLarge": false,
+    "hunks": [
+      {
+        "oldStart": 1,
+        "oldLines": 2,
+        "newStart": 1,
+        "newLines": 2,
+        "lines": [
+          { "kind": "context", "oldNo": 1, "newNo": 1, "text": "const a = 1;", "segments": null },
+          { "kind": "del", "oldNo": 2, "newNo": null, "text": "const b = 2;", "segments": [[10, 11]] },
+          { "kind": "add", "oldNo": null, "newNo": 2, "text": "const b = 3;", "segments": [[10, 11]] }
+        ]
+      }
+    ],
+    "oldText": "const a = 1;\nconst b = 2;\n",
+    "newText": "const a = 1;\nconst b = 3;\n"
+  },
+  "enums": {
+    "authSource": ["env", "ghCli", "keychain"],
+    "inboxReason": ["reviewRequested", "authored", "other"],
+    "fileStatus": ["added", "removed", "modified", "renamed", "copied", "changed"],
+    "viewedState": ["VIEWED", "UNVIEWED", "DISMISSED"],
+    "lineKind": ["context", "add", "del"]
+  }
+}

@@ -99,27 +99,31 @@
 .unified .dr { grid-template-columns: var(--gw) var(--gw) minmax(0, 1fr); }
 
 .ln {
+  position: relative;
   padding: 0 8px 0 4px;
   text-align: right;
   color: var(--dv-ln);
   user-select: none;
   -webkit-user-select: none;
   cursor: default;
-  overflow: hidden;
 }
+/* +/- marker: drawn by the gutter next to the code, over the code cell's left border. */
+.split .ln::after,
+.unified .ln:nth-child(2)::after {
+  position: absolute;
+  left: 100%;
+  width: 22px;
+  text-align: center;
+}
+.split .ln.add::after, .unified .ln.add:nth-child(2)::after { content: "+"; color: var(--dv-add-sign); }
+.split .ln.del::after, .unified .ln.del:nth-child(2)::after { content: "−"; color: var(--dv-del-sign); }
 .split .dc:not(:last-child) { border-right: 1px solid var(--dv-border); }
 
+/* The transparent left border (not padding) keeps horizontally scrolled text clipped clear of the marker. */
 .dc {
-  position: relative;
   overflow: hidden;
-  padding-left: 22px;
+  border-left: 22px solid transparent;
   white-space: pre;
-}
-.dc::before {
-  position: absolute;
-  left: 8px;
-  user-select: none;
-  -webkit-user-select: none;
 }
 .dt {
   transform: translateX(calc(-1 * var(--sx, 0px)));
@@ -130,10 +134,8 @@
 
 .dc.add, .dr.add .dc { background: var(--dv-add-bg); }
 .ln.add { background: var(--dv-add-ln); }
-.dc.add::before { content: "+"; color: var(--dv-add-sign); }
 .dc.del { background: var(--dv-del-bg); }
 .ln.del { background: var(--dv-del-ln); }
-.dc.del::before { content: "−"; color: var(--dv-del-sign); }
 .ln.fill, .dc.fill { background: var(--dv-fill); }
 
 /* Intra-line changes: the exact characters that changed. */

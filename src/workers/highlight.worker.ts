@@ -1,19 +1,20 @@
 /// <reference lib="webworker" />
 // Highlight worker: tokenizes whole texts with Shiki off the main thread.
-// High-priority requests (the visible file) are served newest-first, before low
-// ones (prefetch, oldest-first). Queued or in-flight requests can be cancelled.
+// High-priority requests (the visible file) run before low ones (prefetch), and
+// preempt a running low one between chunks. Requests can be cancelled.
 import { createHighlightCore, HighlightCancelled } from "../lib/highlight-core";
-import type { SideTokens, ThemeName, WorkerRequest, WorkerResponse } from "../lib/highlight-protocol";
+import type { SideTokens, WorkerRequest, WorkerResponse } from "../lib/highlight-protocol";
 
 declare const self: DedicatedWorkerGlobalScope;
 
-const core = createHighlightCore();
 type Job = Extract<WorkerRequest, { type: "highlight" }>;
+
+const core = createHighlightCore();
 const high: Job[] = [];
 const low: Job[] = [];
+const inflight = new Set<number>();
 const cancelled = new Set<number>();
 let running = false;
-let currentId = -1;
 
 // Small LRU keyed by content so identical texts (re-fetched diffs) are free.
 const CACHE_MAX = 32;
@@ -25,37 +26,46 @@ function hash(s: string): string {
   return (h >>> 0).toString(36) + ":" + s.length;
 }
 
-const yieldFn = () => new Promise<void>((r) => setTimeout(r, 0));
+const tick = () => new Promise<void>((r) => setTimeout(r, 0));
+
+async function run(req: Job, isLow: boolean) {
+  const key = `${req.theme}\0${req.lang}\0${hash(req.text)}`;
+  inflight.add(req.id);
+  try {
+    let tokens = cache.get(key);
+    if (tokens === undefined) {
+      tokens = await core.tokenize(req.text, req.lang, req.theme, {
+        yieldFn: async () => {
+          await tick();
+          if (isLow) while (high.length > 0) await run(high.shift()!, false);
+        },
+        isCancelled: () => cancelled.has(req.id),
+        onProgress: (partial) => post({ id: req.id, ok: true, done: false, tokens: partial }),
+      });
+      cache.set(key, tokens);
+      if (cache.size > CACHE_MAX) cache.delete(cache.keys().next().value!);
+    } else {
+      cache.delete(key);
+      cache.set(key, tokens);
+    }
+    post({ id: req.id, ok: true, done: true, tokens });
+  } catch (e) {
+    post({ id: req.id, ok: false, error: String(e), cancelled: e instanceof HighlightCancelled });
+  } finally {
+    inflight.delete(req.id);
+    cancelled.delete(req.id);
+  }
+}
 
 async function pump() {
   if (running) return;
   running = true;
+  // Let messages posted together arrive before choosing what to run.
+  await tick();
   while (high.length > 0 || low.length > 0) {
-    const req = high.length > 0 ? high.pop()! : low.shift()!;
-    currentId = req.id;
-    const key = `${req.theme}\0${req.lang}\0${hash(req.text)}`;
-    try {
-      let tokens = cache.get(key);
-      if (tokens === undefined) {
-        tokens = await core.tokenize(req.text, req.lang, req.theme as ThemeName, {
-          yieldFn,
-          isCancelled: () => cancelled.has(req.id),
-          onProgress: (partial) => post({ id: req.id, ok: true, done: false, tokens: partial }),
-        });
-        cache.set(key, tokens);
-        if (cache.size > CACHE_MAX) cache.delete(cache.keys().next().value!);
-      } else {
-        cache.delete(key);
-        cache.set(key, tokens);
-      }
-      post({ id: req.id, ok: true, done: true, tokens });
-    } catch (e) {
-      const isCancel = e instanceof HighlightCancelled;
-      post({ id: req.id, ok: false, error: String(e), cancelled: isCancel });
-    }
-    cancelled.delete(req.id);
+    const isLow = high.length === 0;
+    await run(isLow ? low.shift()! : high.shift()!, isLow);
   }
-  currentId = -1;
   running = false;
 }
 
@@ -79,11 +89,8 @@ self.onmessage = (e: MessageEvent<WorkerRequest>) => {
     return;
   }
   if (msg.type === "cancel") {
-    if (take(msg.id)) {
-      post({ id: msg.id, ok: false, error: "cancelled", cancelled: true });
-    } else if (msg.id === currentId) {
-      cancelled.add(msg.id);
-    }
+    if (take(msg.id)) post({ id: msg.id, ok: false, error: "cancelled", cancelled: true });
+    else if (inflight.has(msg.id)) cancelled.add(msg.id);
     return;
   }
   (msg.low ? low : high).push(msg);

@@ -1,0 +1,86 @@
+# Fast Reviewer
+
+A fast desktop app for reviewing GitHub pull requests: a file tree on the left, a syntax-highlighted diff on the right, and one-key review (`r` marks the file viewed on GitHub and moves to the next one). It targets macOS first and is built on Tauri 2, so Linux is supported too.
+
+![Split view](docs/screenshots/split-light.png)
+
+## Features
+
+- **PR picker** (`⌘K`): PRs waiting for your review and your own PRs. You can also fuzzy-search your repos and browse their open PRs, or paste a PR URL or `owner/repo#123`.
+- **File tree**: folders first, then files, both alphabetical. Single-child folder chains are compacted (`src/lib/utils`). Each file shows its `+N −M` counts, status (A/M/D/R) and a viewed tick, and the header shows progress. Filter with `/`.
+- **Diff**: split (side by side) or unified view. Changed lines are tinted, and the exact characters that changed inside a modified line get a stronger highlight. You can expand hidden context around hunks.
+- **Syntax highlighting**: VS Code-quality highlighting (Shiki / TextMate grammars) for TypeScript, TSX, JavaScript, HTML, CSS, Python, JSON, Markdown, Rust, Go and more than 200 other languages. Grammars load on demand and highlighting runs in a Web Worker, so it never blocks scrolling.
+- **GitHub sync**: "viewed" state is read from GitHub and written back in the background. It is the same checkbox as on github.com. If the write fails, the change is undone and a message is shown.
+- **Speed**: the next files' diffs are fetched ahead of time, so `r` and `s` switch files in under 20 ms. Only visible rows are rendered, which keeps 5,000-line diffs smooth. Diffs are computed in Rust and cached in memory, and file contents are cached on disk by commit SHA.
+- Light and dark mode follow the system setting.
+
+## Keyboard shortcuts
+
+| Key | Action |
+|---|---|
+| `r` | Mark file viewed (synced to GitHub in the background) and go to the next unviewed file |
+| `s` | Skip to the next unviewed file without marking |
+| `j` / `↓` | Next file |
+| `k` / `↑` | Previous file |
+| `u` | Toggle viewed on the current file |
+| `v` | Toggle split / unified (remembered) |
+| `n` / `p` | Next / previous hunk |
+| `/` | Filter files |
+| `o` | Open the PR in the browser |
+| `⌘K` / `Ctrl+K` | Open a pull request |
+| `?` | Show shortcuts |
+| `Esc` | Close overlay / clear filter |
+
+## Authentication
+
+The app looks for a GitHub token in this order:
+
+1. The `GH_TOKEN` or `GITHUB_TOKEN` environment variable
+2. The GitHub CLI (`gh auth token`). If `gh` is installed and logged in, nothing else is needed.
+3. A token pasted into the sign-in screen. It is checked against GitHub, then stored in the OS keychain under the service `fast-reviewer`.
+
+If you paste a token, use either:
+- a classic PAT with the `repo` scope, or
+- a fine-grained PAT with **Pull requests: read & write** and **Contents: read**.
+
+For GitHub Enterprise, set `GITHUB_API_URL` (for example `https://ghe.example.com/api/v3`).
+
+## Development
+
+Prerequisites: Rust (stable), Node 22+ and pnpm. On macOS you also need the Xcode command-line tools. On Linux you need the WebKitGTK 4.1 dev packages (see the [Tauri prerequisites](https://tauri.app/start/prerequisites/)).
+
+```sh
+pnpm install
+pnpm tauri dev          # run the desktop app with hot reload
+pnpm dev                # UI only in a browser at http://localhost:1420, using the mock backend
+```
+
+Build a release:
+
+```sh
+pnpm tauri build                 # macOS: target/release/bundle/macos/Fast Reviewer.app and bundle/dmg/*.dmg
+pnpm tauri build --no-bundle     # just the binary: target/release/fast-reviewer
+```
+
+The mock backend is used automatically outside Tauri. It serves a 28-file fixture PR, a 2,400-file PR and a 3,000-line generated file. Flags: `?mock=unauth` starts signed out, and `?mock=failviewed` makes viewed-sync fail.
+
+## Tests
+
+```sh
+cargo test --workspace                          # diff engine, GitHub client against a mock server, IPC contract
+cargo clippy --workspace --all-targets -- -D warnings
+pnpm typecheck
+pnpm test                                       # Vitest unit tests
+pnpm e2e                                        # Playwright end-to-end tests (mock backend)
+cargo test --release -p fast_reviewer_core --test diff_perf -- --ignored --nocapture   # diff timings
+GH_TOKEN=... cargo run -p fast_reviewer_core --example smoke -- <owner> <repo> <number> # read-only check against real GitHub
+```
+
+`src/lib/contract.fixture.json` is shared by `crates/core/tests/contract.rs` and `src/lib/contract.test.ts`. This keeps the Rust serde output and the TypeScript types in `src/lib/types.ts` in sync.
+
+## Architecture
+
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). The main pieces:
+- `crates/core`: a Rust crate with no Tauri dependency. It handles GitHub, auth, diffing and caching.
+- `src-tauri`: thin command wrappers around `crates/core`.
+- `src/`: the UI, written in SolidJS + TypeScript. Shiki highlighting runs in `src/workers/`.

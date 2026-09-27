@@ -176,16 +176,14 @@ function startEntry(diff: FileDiff, theme: ThemeName, low: boolean, byTheme: Map
     }
     if (full != null) specs.push({ side, kind: "full", text: full });
   }
-  // Service order: sketches (new, old), then whole files (new, old).
+  // Service order (the worker queues are FIFO): sketches (new, old), then whole files (new, old).
   specs.sort((a, b) => (a.kind === b.kind ? 0 : a.kind === "sketch" ? -1 : 1));
-  // The high queue is served newest-first, the low queue oldest-first.
-  const postOrder = low ? specs : specs.slice().reverse();
 
-  let remaining = postOrder.length;
+  let remaining = specs.length;
   const finish = () => {
     if (--remaining === 0) entry.done = true;
   };
-  for (const spec of postOrder) {
+  for (const spec of specs) {
     const job = highlightText(
       spec.text,
       lang,
