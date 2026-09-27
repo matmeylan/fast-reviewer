@@ -1,4 +1,5 @@
 import { Match, Show, Switch } from "solid-js";
+import logoUrl from "../../assets/logo.svg";
 import type { AppStore } from "../lib/store";
 import DiffView from "./DiffView";
 import { Counts } from "./FileTree";
@@ -63,6 +64,15 @@ export default function MainPane(props: { store: AppStore }) {
                 Loading {ref().owner}/{ref().repo}#{ref().number}…
               </div>
             )}
+          </Match>
+          <Match when={!s.pr()}>
+            <div class="placeholder welcome" data-testid="welcome">
+              <img src={logoUrl} alt="" width="96" height="96" />
+              <div class="welcome-title">Fast Reviewer</div>
+              <div class="muted">
+                <kbd>⌘K</kbd> to open a pull request
+              </div>
+            </div>
           </Match>
           <Match when={s.done()}>
             <div class="placeholder done" data-testid="all-reviewed">

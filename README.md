@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/logo.svg" width="128" height="128" alt="Fast Reviewer logo"></p>
+
 # Fast Reviewer
 
 A fast desktop app for reviewing GitHub pull requests: a file tree on the left, a syntax-highlighted diff on the right, and one-key review (`r` marks the file viewed on GitHub and moves to the next one). It targets macOS first and is built on Tauri 2, so Linux is supported too.
