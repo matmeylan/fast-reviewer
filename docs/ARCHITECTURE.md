@@ -53,5 +53,9 @@ A native desktop app (macOS first, Linux later) for reviewing GitHub pull reques
 
 - `cargo test -p fast_reviewer_core` — diff engine, tree/sort, GitHub client against a mock HTTP server (PR loading, REST fallback, auth re-resolution, IPC contract).
 - `pnpm test` — Vitest unit tests (tree building, keyboard reducer, highlighting helpers).
+- Diff correctness, end to end, against `git diff` output of a real PR (`crates/core/tests/fixtures/git_compare`):
+  - `crates/core/tests/git_compare.rs` — the diff engine produces git's hunks.
+  - `crates/core/tests/diff_fetch.rs` — through `Service` and a fake GitHub whose base branch moved on after the PR branched: each file is diffed from the merge base (not the base tip) to the head, renames use the old path, and a new push is not served from the diff cache.
+  - `src/components/DiffView.integrity.test.tsx` — reads back what `DiffView` renders in split and unified mode: the old and new sides are exactly the diff's lines with the right numbers, and with every gap expanded they are the whole old and new files (fixtures plus pseudo-random edits).
 - `pnpm e2e` — Playwright against the production bundle (`vite build` + `vite preview` on port 1421; the dev server force-reloads pages on a cold dependency cache). Outside Tauri, `src/lib/api.ts` uses an in-memory mock backend (`src/lib/mock.ts`), so the full UI can be exercised in a browser. Mock flags: `?mock=unauth`, `?mock=failviewed`, `?mockViewedDelay=<ms>`.
 - `crates/core/examples/smoke.rs` — read-only timing run against real GitHub. `crates/core/examples/compare_git.rs` — diffs every file of a real PR and compares with `git diff` in a local clone (exits 1 on mismatch). Neither writes to GitHub.
