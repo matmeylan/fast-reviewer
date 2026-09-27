@@ -1,12 +1,13 @@
 // OWNER: diff-view agent. Contract used by the app shell:
 // <DiffView diff mode hunkNav /> renders one file's diff, virtualized, with
 // syntax highlighting swapped in from the highlight worker when ready.
-import { createEffect, createMemo, createSignal, For, Match, on, onCleanup, onMount, Show, Switch } from "solid-js";
+import { createEffect, createMemo, createSignal, For, Match, on, onCleanup, onMount, Show, Switch, untrack } from "solid-js";
 import type { DiffLine, FileDiff } from "../lib/types";
 import type { ThemeName } from "../lib/highlight-protocol";
 import { renderLineHtml, paletteCss } from "../lib/highlight-merge";
 import { colorScheme, highlightDiff, paletteOf, tokensFor, type Side } from "../lib/highlight-client";
 import {
+  anchorRow,
   buildRows,
   computeGaps,
   emptyExpansion,
@@ -15,6 +16,7 @@ import {
   splitTextLines,
   type Expansion,
   type Row,
+  type RowModel,
 } from "./diff-rows";
 import "./diff.css";
 
@@ -180,6 +182,24 @@ function DiffBody(props: DiffViewProps) {
   });
 
   createEffect(on(() => props.mode, () => requestAnimationFrame(measureCode), { defer: true }));
+
+  // Split and unified give the same line different row indexes. On a mode switch,
+  // keep the first visible source line at the top instead of the pixel offset.
+  let shown: { model: RowModel; mode: DiffMode; diff: FileDiff } | null = null;
+  createEffect(
+    on(model, (m) => {
+      const prev = shown;
+      shown = { model: m, mode: props.mode, diff: props.diff };
+      if (!prev || prev.diff !== props.diff || prev.mode === props.mode) return;
+      // The signal, not scroller.scrollTop: the DOM may already be clamped to the new height.
+      const top = untrack(scrollTop);
+      const first = Math.floor(top / ROW_HEIGHT);
+      const target = anchorRow(prev.model.rows, first, m.rows);
+      if (target === undefined) return;
+      scroller.scrollTop = target * ROW_HEIGHT + (top - first * ROW_HEIGHT);
+      setScrollTop(scroller.scrollTop);
+    }),
+  );
 
   createEffect(
     on(

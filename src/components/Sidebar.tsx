@@ -44,6 +44,15 @@ export default function Sidebar(props: { store: AppStore }) {
                 {s.viewedCount()}/{total()} viewed
               </span>
             </div>
+            <Show when={pr().filesTruncated}>
+              <div class="truncated-warning" role="alert" data-testid="files-truncated">
+                <span aria-hidden="true">⚠</span>
+                <span>
+                  Showing {pr().files.length.toLocaleString()} of {pr().totalFiles.toLocaleString()} files — GitHub
+                  limits the file list
+                </span>
+              </div>
+            </Show>
           </header>
         )}
       </Show>

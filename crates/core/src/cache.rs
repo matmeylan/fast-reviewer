@@ -14,6 +14,8 @@ pub struct DiffKey {
     pub repo: String,
     pub number: u64,
     pub path: String,
+    /// Old side's path for renames/copies: a different old path is a different diff.
+    pub old_path: Option<String>,
     pub base_sha: String,
     pub head_sha: String,
 }
@@ -166,6 +168,7 @@ mod tests {
             repo: "r".into(),
             number: 1,
             path: p.into(),
+            old_path: None,
             base_sha: "b".into(),
             head_sha: "h".into(),
         };

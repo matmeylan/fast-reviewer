@@ -298,6 +298,20 @@ kbd + kbd {
   font-variant-numeric: tabular-nums;
 }
 
+.truncated-warning {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+  margin-top: 8px;
+  padding: 6px 8px;
+  border: 1px solid color-mix(in srgb, var(--attention) 40%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--attention) 12%, transparent);
+  color: var(--attention);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
 .filter {
   padding: 6px 8px;
 }

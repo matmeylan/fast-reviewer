@@ -16,6 +16,32 @@ const RAW: &str = "application/vnd.github.raw+json";
 const PAGE: usize = 100;
 /// GitHub caps PR file listings at 3000 files.
 const MAX_PAGES: usize = 30;
+/// Concurrent REST file-list page requests (stays well under GitHub's secondary limits).
+const PAGE_CONCURRENCY: usize = 8;
+/// Bytes kept from a body whose declared length is already over the limit: enough for
+/// binary detection (`diff::is_binary` looks at the first 8 KiB).
+const SNIFF_BYTES: usize = 8192;
+
+/// File contents fetched with a size limit.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Content {
+    /// The path does not exist at that ref.
+    Missing,
+    Bytes(Vec<u8>),
+    /// Longer than the limit. Holds only the first bytes read (at least `SNIFF_BYTES`
+    /// when the body is that long), so binary detection still works.
+    TooLarge(Vec<u8>),
+}
+
+impl Content {
+    /// The bytes read, if the file exists (only a prefix for `TooLarge`).
+    pub fn bytes(&self) -> Option<&[u8]> {
+        match self {
+            Content::Missing => None,
+            Content::Bytes(b) | Content::TooLarge(b) => Some(b),
+        }
+    }
+}
 
 pub struct GitHub {
     http: reqwest::Client,
@@ -209,10 +235,11 @@ impl GitHub {
     }
 
     /// PR metadata and all changed files (GraphQL, cursor-paginated). `previous_path` is left empty.
+    /// Stops after `MAX_PAGES` pages and sets `truncated` if GitHub still reports more.
     pub async fn pr_graphql(&self, owner: &str, repo: &str, number: u64) -> Result<GqlPr> {
         let mut after: Option<String> = None;
         let mut pr: Option<GqlPr> = None;
-        for _ in 0..MAX_PAGES {
+        for page_no in 0..MAX_PAGES {
             let vars = json!({ "owner": owner, "repo": repo, "number": number, "after": after });
             let data: GqlRepoData = self.graphql(PR_QUERY, vars).await?;
             let page = data
@@ -228,6 +255,7 @@ impl GitHub {
             acc.files
                 .extend(files.nodes.into_iter().flatten().map(GqlFile::into_changed));
             match info.end_cursor.filter(|_| info.has_next_page) {
+                Some(_) if page_no + 1 == MAX_PAGES => acc.truncated = true,
                 Some(c) => after = Some(c),
                 None => break,
             }
@@ -248,26 +276,48 @@ impl GitHub {
             head_ref_name: p.head.git_ref,
             base_ref_oid: p.base.sha,
             head_ref_oid: p.head.sha,
+            changed_files: p.changed_files,
             files: Vec::new(),
+            truncated: false,
         })
     }
 
     /// All changed files via REST (paginated), including `previous_path` for renames/copies.
     /// REST cannot see the viewer's viewed state, so `viewed` is always `Unviewed`.
+    ///
+    /// With `total` (the PR's changed-file count) the pages are fetched concurrently;
+    /// without it, one after another until a short page.
     pub async fn pr_files_rest(
         &self,
         owner: &str,
         repo: &str,
         number: u64,
+        total: Option<u32>,
     ) -> Result<Vec<ChangedFile>> {
+        use futures::stream::{self, StreamExt, TryStreamExt};
+
         let path = format!("/repos/{}/{}/pulls/{number}/files", enc(owner), enc(repo));
-        let per_page = PAGE.to_string();
+        let fetch = |page: usize| {
+            let path = &path;
+            async move {
+                let (per_page, p) = (PAGE.to_string(), page.to_string());
+                self.get_json::<Vec<RestFile>>(path, &[("per_page", &per_page), ("page", &p)])
+                    .await
+            }
+        };
         let mut out = Vec::new();
-        for page in 1..=MAX_PAGES {
-            let p = page.to_string();
-            let files: Vec<RestFile> = self
-                .get_json(&path, &[("per_page", &per_page), ("page", &p)])
+        if let Some(total) = total {
+            let pages = (total as usize).div_ceil(PAGE).clamp(1, MAX_PAGES);
+            let chunks: Vec<Vec<RestFile>> = stream::iter(1..=pages)
+                .map(fetch)
+                .buffered(PAGE_CONCURRENCY)
+                .try_collect()
                 .await?;
+            out.extend(chunks.into_iter().flatten().map(RestFile::into_changed));
+            return Ok(out);
+        }
+        for page in 1..=MAX_PAGES {
+            let files = fetch(page).await?;
             let n = files.len();
             out.extend(files.into_iter().map(RestFile::into_changed));
             if n < PAGE {
@@ -295,14 +345,16 @@ impl GitHub {
         Ok(cmp.merge_base_commit.sha)
     }
 
-    /// Raw file bytes at `git_ref`, or None if the path does not exist there.
+    /// Raw file bytes at `git_ref`. Stops reading once the body exceeds `limit` bytes
+    /// (or right away if `Content-Length` already says so) and returns `TooLarge`.
     pub async fn file_content(
         &self,
         owner: &str,
         repo: &str,
         git_ref: &str,
         path: &str,
-    ) -> Result<Option<Vec<u8>>> {
+        limit: usize,
+    ) -> Result<Content> {
         let url_path = format!(
             "/repos/{}/{}/contents/{}",
             enc(owner),
@@ -316,10 +368,28 @@ impl GitHub {
             .header(ACCEPT, RAW);
         let resp = self.authed(rb)?.send().await?;
         if resp.status() == StatusCode::NOT_FOUND {
-            return Ok(None);
+            return Ok(Content::Missing);
         }
-        let resp = check(resp, &url_path).await?;
-        Ok(Some(resp.bytes().await?.to_vec()))
+        let mut resp = check(resp, &url_path).await?;
+        let declared_large = resp.content_length().is_some_and(|n| n > limit as u64);
+        let stop_at = if declared_large {
+            SNIFF_BYTES.min(limit)
+        } else {
+            limit
+        };
+        let mut buf = Vec::new();
+        while let Some(chunk) = resp.chunk().await? {
+            buf.extend_from_slice(&chunk);
+            if buf.len() > stop_at {
+                // Dropping `resp` abandons the rest of the body.
+                return Ok(Content::TooLarge(buf));
+            }
+        }
+        Ok(if buf.len() > limit {
+            Content::TooLarge(buf)
+        } else {
+            Content::Bytes(buf)
+        })
     }
 
     pub async fn set_file_viewed(&self, pr_id: &str, path: &str, viewed: bool) -> Result<()> {
@@ -414,7 +484,7 @@ const PR_QUERY: &str = r#"query($owner: String!, $repo: String!, $number: Int!, 
     pullRequest(number: $number) {
       id title url
       author { login }
-      baseRefName headRefName baseRefOid headRefOid
+      baseRefName headRefName baseRefOid headRefOid changedFiles
       files(first: 100, after: $after) {
         pageInfo { hasNextPage endCursor }
         nodes { path additions deletions changeType viewerViewedState }
@@ -476,8 +546,14 @@ pub struct GqlPr {
     pub head_ref_name: String,
     pub base_ref_oid: String,
     pub head_ref_oid: String,
+    /// GitHub's count of changed files; can exceed what the listing APIs return.
+    #[serde(default)]
+    pub changed_files: Option<u32>,
     #[serde(skip)]
     pub files: Vec<ChangedFile>,
+    /// The file listing stopped at the page cap while GitHub still reported more.
+    #[serde(skip)]
+    pub truncated: bool,
 }
 
 #[derive(Default, Deserialize)]
@@ -644,6 +720,8 @@ struct RestPull {
     title: String,
     html_url: String,
     user: Option<Login>,
+    #[serde(default)]
+    changed_files: Option<u32>,
     base: RestRef,
     head: RestRef,
 }

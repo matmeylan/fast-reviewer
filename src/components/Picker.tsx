@@ -9,6 +9,12 @@ type Item =
   | { kind: "pr"; pr: PrSummary }
   | { kind: "repo"; repo: RepoSummary };
 
+function itemKey(item: Item): string {
+  if (item.kind === "ref") return `ref:${item.ref.owner}/${item.ref.repo}#${item.ref.number}`;
+  if (item.kind === "pr") return `pr:${item.pr.owner}/${item.pr.repo}#${item.pr.number}`;
+  return `repo:${item.repo.owner}/${item.repo.name}`;
+}
+
 type Stage = { kind: "main" } | { kind: "repo"; owner: string; repo: string };
 
 const SEARCH_DEBOUNCE_MS = 200;
@@ -42,6 +48,8 @@ export default function Picker(props: { store: AppStore; dismissable: boolean })
     on([query, stage], ([q, st]) => {
       const seq = ++searchSeq;
       const term = q.trim();
+      // A search error belongs to the query that caused it.
+      if (st.kind === "main") setError(null);
       if (st.kind !== "main" || term.length < 2 || parsePrRef(term)) {
         setSearching(false);
         setRepos(null);
@@ -78,7 +86,26 @@ export default function Picker(props: { store: AppStore; dismissable: boolean })
     return out;
   });
 
-  createEffect(on(items, () => setActive(0)));
+  // A new query or stage starts at the top. Items that change underneath the user
+  // (inbox refresh, repo search results) keep the highlighted item by identity, so
+  // an Enter already on its way opens what the user chose.
+  let lastQuery = query();
+  let lastStage = stage();
+  createEffect(
+    on(items, (list, prev) => {
+      const q = query();
+      const st = stage();
+      const reset = !prev || q !== lastQuery || st !== lastStage;
+      lastQuery = q;
+      lastStage = st;
+      if (reset) return setActive(0);
+      const i = active();
+      const was = prev[i];
+      const key = was ? itemKey(was) : null;
+      const found = key === null ? -1 : list.findIndex((it) => itemKey(it) === key);
+      setActive(found >= 0 ? found : Math.max(0, Math.min(i, list.length - 1)));
+    }),
+  );
   createEffect(
     on(active, (i) => {
       list?.querySelector(`[data-index="${i}"]`)?.scrollIntoView({ block: "nearest" });
@@ -97,11 +124,13 @@ export default function Picker(props: { store: AppStore; dismissable: boolean })
     setQuery("");
     setRepoPrs(null);
     setError(null);
+    const stageRef = stage();
     try {
       const prs = await s.listRepoPrs(owner, repo);
-      const st = stage();
-      if (st.kind === "repo" && st.owner === owner && st.repo === repo) setRepoPrs(prs);
+      if (stage() === stageRef) setRepoPrs(prs);
     } catch (e) {
+      // A late failure for a repo the user already left must not land on another one.
+      if (stage() !== stageRef) return;
       setError(errorMessage(e));
       setRepoPrs([]);
     }

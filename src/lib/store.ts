@@ -31,6 +31,11 @@ export interface Toast {
 export const SWAP_DELAY_MS = 80;
 /** Unviewed files to prefetch ahead of the current one (the next `r` / `s` targets). */
 export const PREFETCH = 3;
+/**
+ * Diffs kept in memory per PR (LRU): the current file, the prefetch window and
+ * recently visited files. Bounds memory on PRs with thousands of files.
+ */
+export const DIFF_CACHE_MAX = 48;
 /** Grammars preloaded when a PR opens (most common languages in it first). */
 const WARM_LANGS = 12;
 const TOAST_MS = 4000;
@@ -108,26 +113,46 @@ export function createAppStore(backend: Backend) {
   const dismissToast = (id: number) => setToasts((t) => t.filter((x) => x.id !== id));
 
   // --- diff cache -----------------------------------------------------------
-  // Keyed by path within the current PR; cleared on PR switch.
+  // Keyed by path within the current PR; cleared on PR switch. A bounded LRU:
+  // `cache` holds insertion/recency order, `ready` mirrors its settled entries.
+  // Evicted diffs (and the highlight tokens keyed on them) can be garbage
+  // collected and are re-fetched from the Rust / disk cache when revisited.
   let cache = new Map<string, Promise<FileDiff>>();
   let ready = new Map<string, FileDiff>();
 
+  /** Mark `path` most recently used. */
+  function touch(path: string) {
+    const hit = cache.get(path);
+    if (hit) {
+      cache.delete(path);
+      cache.set(path, hit);
+    }
+  }
+
   function fetchDiff(path: string): Promise<FileDiff> {
     const hit = cache.get(path);
-    if (hit) return hit;
+    if (hit) {
+      touch(path);
+      return hit;
+    }
     const p = pr()!;
     const mine = cache;
-    const promise = backend.getFileDiff(p.owner, p.repo, p.number, path).then(
+    const promise: Promise<FileDiff> = backend.getFileDiff(p.owner, p.repo, p.number, path).then(
       (d) => {
-        if (mine === cache) ready.set(path, d);
+        if (mine === cache && cache.get(path) === promise) ready.set(path, d);
         return d;
       },
       (e) => {
-        if (mine === cache) cache.delete(path);
+        if (mine === cache && cache.get(path) === promise) cache.delete(path);
         throw e;
       },
     );
     cache.set(path, promise);
+    while (cache.size > DIFF_CACHE_MAX) {
+      const oldest = cache.keys().next().value!;
+      cache.delete(oldest);
+      ready.delete(oldest);
+    }
     return promise;
   }
 
@@ -163,7 +188,10 @@ export function createAppStore(backend: Backend) {
         if (collapsed[dir] && isAncestor(dir, path)) setCollapsed(dir, false);
       }
       const hit = ready.get(path);
-      if (hit) setDiff({ path, diff: hit, loading: false, error: null });
+      if (hit) {
+        touch(path);
+        setDiff({ path, diff: hit, loading: false, error: null });
+      }
     });
     if (!ready.has(path)) {
       // Keep the previous diff on screen briefly so fast loads swap without a flash.
@@ -233,6 +261,8 @@ export function createAppStore(backend: Backend) {
         map[f.path] = v;
         if (v) count++;
       }
+      // Drop pending select() callbacks and swap timers from the previous PR.
+      selectSeq++;
       batch(() => {
         setPr(detail);
         setViewedMap(reconcile(map));
@@ -310,8 +340,13 @@ export function createAppStore(backend: Backend) {
 
   async function signOut() {
     const status = await backend.signOut();
+    selectSeq++;
+    openSeq++;
     batch(() => {
       setPr(null);
+      setPrLoading(null);
+      setSelected(null);
+      setDiff({ path: null, diff: null, loading: false, error: null });
       setInbox(null);
       setAuth(status);
       setPhase("auth");
@@ -324,7 +359,11 @@ export function createAppStore(backend: Backend) {
     storage.set(KEY_MODE, m);
   }
 
+  /** Actions that stay live while a PR is loading; the rest would act on the hidden previous PR. */
+  const LOADING_ACTIONS: ReadonlySet<Action> = new Set<Action>(["picker", "help", "escape"]);
+
   function dispatch(action: Action) {
+    if (prLoading() && !LOADING_ACTIONS.has(action)) return;
     const u = reduce(
       {
         order: order(),

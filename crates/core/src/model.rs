@@ -93,8 +93,12 @@ pub struct PrDetail {
     pub head_ref: String,
     pub base_sha: String,
     pub head_sha: String,
-    /// Sorted by path.
+    /// Sorted by path. At most 3000 files (GitHub's listing cap); see `files_truncated`.
     pub files: Vec<ChangedFile>,
+    /// Number of changed files GitHub reports for the PR (may exceed `files.len()`).
+    pub total_files: u32,
+    /// True when `files` is not the full list (the PR has more files than GitHub will list).
+    pub files_truncated: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

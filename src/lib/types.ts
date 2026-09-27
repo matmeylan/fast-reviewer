@@ -55,8 +55,12 @@ export interface PrDetail {
   headRef: string;
   baseSha: string;
   headSha: string;
-  /** Sorted by path. */
+  /** Sorted by path. At most 3000 files (GitHub's listing cap); see `filesTruncated`. */
   files: ChangedFile[];
+  /** Number of changed files GitHub reports for the PR (may exceed `files.length`). */
+  totalFiles: number;
+  /** True when `files` is not the full list (the PR has more files than GitHub will list). */
+  filesTruncated: boolean;
 }
 
 export type LineKind = "context" | "add" | "del";

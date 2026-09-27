@@ -51,6 +51,8 @@ fn structs_serialize_like_fixture() {
             deletions: 1,
             viewed: ViewedState::Viewed,
         }],
+        total_files: 3200,
+        files_truncated: true,
     };
     let line = |kind, old_no, new_no, text: &str, segments| DiffLine {
         kind,

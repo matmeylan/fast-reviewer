@@ -39,7 +39,9 @@
         "deletions": 1,
         "viewed": "VIEWED"
       }
-    ]
+    ],
+    "totalFiles": 3200,
+    "filesTruncated": true
   },
   "fileDiff": {
     "path": "src/new.ts",

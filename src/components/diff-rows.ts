@@ -249,3 +249,47 @@ export function buildRows(
   maxLineNo = Math.max(maxLineNo, last.end - 1, last.end - 1 + last.delta);
   return { rows, hunkRows, maxCols, maxLineNo };
 }
+
+/**
+ * Identity of a source line that survives rebuilding the rows (context lines in
+ * expanded gaps are fresh objects each build, so object identity is not enough).
+ */
+function lineKey(l: DiffLine): string {
+  return l.kind === "del" ? `d${l.oldNo}` : l.kind === "add" ? `a${l.newNo}` : `c${l.newNo}`;
+}
+
+/** The key of the line a row starts with: the old side first, as unified view lists it. */
+function rowKey(row: Row): string {
+  if (row.t === "hunk") return `h${row.gap}`;
+  if (row.t === "line") return lineKey(row.line);
+  return lineKey((row.left ?? row.right)!);
+}
+
+function rowHas(row: Row, key: string): boolean {
+  if (row.t === "hunk") return key === `h${row.gap}`;
+  if (row.t === "line") return lineKey(row.line) === key;
+  return (row.left !== null && lineKey(row.left) === key) || (row.right !== null && lineKey(row.right) === key);
+}
+
+/**
+ * Where row `index` of `from` sits in `to`: the row showing the same source line
+ * (or hunk header), so switching split <-> unified keeps the view in place.
+ * Returns undefined when `from` has no such row or `to` does not show that line.
+ */
+export function anchorRow(from: readonly Row[], index: number, to: readonly Row[]): number | undefined {
+  const row = from[index];
+  if (!row) return undefined;
+  const key = rowKey(row);
+  // Row indexes differ by at most the number of split filler/pair rows, so search
+  // outward from `index` to find the match quickly on long diffs.
+  const n = to.length;
+  const start = Math.min(index, n - 1);
+  for (let d = 0; d <= n; d++) {
+    const lo = start - d;
+    const hi = start + d;
+    if (lo < 0 && hi >= n) break;
+    if (hi < n && rowHas(to[hi], key)) return hi;
+    if (d > 0 && lo >= 0 && rowHas(to[lo], key)) return lo;
+  }
+  return undefined;
+}

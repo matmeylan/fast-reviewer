@@ -30,6 +30,7 @@ const prSummaryKeys = keys<PrSummary>({
 const prDetailKeys = keys<PrDetail>({
   id: true, owner: true, repo: true, number: true, title: true, author: true, url: true,
   baseRef: true, headRef: true, baseSha: true, headSha: true, files: true,
+  totalFiles: true, filesTruncated: true,
 });
 const changedFileKeys = keys<ChangedFile>({
   path: true, previousPath: true, status: true, additions: true, deletions: true, viewed: true,
@@ -67,6 +68,13 @@ describe("IPC contract fixture", () => {
 
   it("enum values match types.ts", () => {
     expect(fixture.enums).toEqual(enums);
+  });
+
+  it("prDetail file counts have the right types", () => {
+    const d = fixture.prDetail as unknown as PrDetail;
+    expect(typeof d.totalFiles).toBe("number");
+    expect(typeof d.filesTruncated).toBe("boolean");
+    expect(d.totalFiles).toBeGreaterThanOrEqual(d.files.length);
   });
 
   it("segments are [start, end) UTF-16 tuples into text", () => {

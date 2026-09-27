@@ -1,6 +1,7 @@
 //! High-level API used by the Tauri commands: auth state, PR metadata, cached diffs.
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -11,7 +12,7 @@ use crate::auth::{self, AuthConfig, SOURCE_ORDER};
 use crate::cache::{BlobCache, DiffCache, DiffKey};
 use crate::diff;
 use crate::error::{Error, Result};
-use crate::github::{GitHub, DEFAULT_API_URL};
+use crate::github::{Content, GitHub, DEFAULT_API_URL};
 use crate::model::{
     AuthSource, AuthStatus, FileDiff, FileStatus, InboxReason, PrDetail, PrSummary, RepoSummary,
 };
@@ -51,12 +52,35 @@ struct AuthState {
     source: Option<AuthSource>,
     /// After an explicit sign-out, ignore env / gh CLI until a token is set again.
     signed_out: bool,
+    /// Bumped whenever the active token changes, so a 401 from a request made with an
+    /// older token does not clear a newer one.
+    generation: u64,
+}
+
+impl AuthState {
+    /// Replace the state for a new (or no) token, bumping the generation.
+    fn replace(&mut self, login: Option<String>, source: Option<AuthSource>, signed_out: bool) {
+        *self = AuthState {
+            login,
+            source,
+            signed_out,
+            generation: self.generation.wrapping_add(1),
+        };
+    }
+}
+
+/// The active login and the token generation it belongs to (see `Service::on_err`).
+struct Session {
+    login: String,
+    generation: u64,
 }
 
 type PrKey = (String, String, u64);
 
 /// What `get_file_diff` needs to know about a PR, remembered from `get_pr`.
 struct PrInfo {
+    /// Order in which the `get_pr` that produced this started; a newer fetch always wins.
+    seq: u64,
     base_sha: String,
     head_sha: String,
     /// path -> (previous path, status)
@@ -71,6 +95,7 @@ pub struct Service {
     auth_cfg: AuthConfig,
     auth: tokio::sync::Mutex<AuthState>,
     prs: Mutex<HashMap<PrKey, Arc<PrInfo>>>,
+    pr_seq: AtomicU64,
     diffs: DiffCache,
     inflight: Mutex<HashMap<DiffKey, DiffFuture>>,
     blobs: BlobCache,
@@ -105,6 +130,7 @@ impl Service {
             auth_cfg: cfg.auth,
             auth: Default::default(),
             prs: Default::default(),
+            pr_seq: AtomicU64::new(0),
             diffs: DiffCache::new(DIFF_CACHE_ENTRIES),
             inflight: Default::default(),
             blobs: BlobCache::new(cfg.cache_dir),
@@ -141,8 +167,8 @@ impl Service {
             match self.gh.login_for(&token).await {
                 Ok(login) => {
                     self.gh.set_token(Some(token));
-                    st.login = Some(login);
-                    st.source = Some(source);
+                    let signed_out = st.signed_out;
+                    st.replace(Some(login), Some(source), signed_out);
                     return Ok(());
                 }
                 // A stale token in one source should not hide a good one in the next.
@@ -151,27 +177,34 @@ impl Service {
             }
         }
         self.gh.set_token(None);
-        st.login = None;
-        st.source = None;
+        let signed_out = st.signed_out;
+        st.replace(None, None, signed_out);
         last_err.map_or(Ok(()), Err)
     }
 
     /// Ensure a token is active before an API call.
-    async fn ensure_auth(&self) -> Result<String> {
+    async fn ensure_auth(&self) -> Result<Session> {
         let mut st = self.auth.lock().await;
         if st.login.is_none() {
             self.resolve(&mut st).await?;
         }
-        st.login.clone().ok_or(Error::NotAuthenticated)
+        let login = st.login.clone().ok_or(Error::NotAuthenticated)?;
+        Ok(Session {
+            login,
+            generation: st.generation,
+        })
     }
 
-    /// Forget the active token after a 401 so the next call re-resolves.
-    async fn on_err<T>(&self, r: Result<T>) -> Result<T> {
+    /// After a 401, forget the token the request was made with so the next call re-resolves.
+    /// A token set since then (`generation` moved on) is left alone.
+    async fn on_err<T>(&self, generation: u64, r: Result<T>) -> Result<T> {
         if matches!(r, Err(Error::Unauthorized)) {
             let mut st = self.auth.lock().await;
-            st.login = None;
-            st.source = None;
-            self.gh.set_token(None);
+            if st.generation == generation {
+                self.gh.set_token(None);
+                let signed_out = st.signed_out;
+                st.replace(None, None, signed_out);
+            }
         }
         r
     }
@@ -191,11 +224,7 @@ impl Service {
         }
         let mut st = self.auth.lock().await;
         self.gh.set_token(Some(token));
-        *st = AuthState {
-            login: Some(login),
-            source: Some(AuthSource::Keychain),
-            signed_out: false,
-        };
+        st.replace(Some(login), Some(AuthSource::Keychain), false);
         Ok(status(&st))
     }
 
@@ -205,10 +234,7 @@ impl Service {
         }
         let mut st = self.auth.lock().await;
         self.gh.set_token(None);
-        *st = AuthState {
-            signed_out: true,
-            ..Default::default()
-        };
+        st.replace(None, None, true);
         *lock(&self.user_repos) = None;
         Ok(status(&st))
     }
@@ -218,18 +244,14 @@ impl Service {
         let login = self.gh.login_for(token).await?;
         let mut st = self.auth.lock().await;
         self.gh.set_token(Some(token.to_owned()));
-        *st = AuthState {
-            login: Some(login),
-            source: Some(AuthSource::Env),
-            signed_out: false,
-        };
+        st.replace(Some(login), Some(AuthSource::Env), false);
         Ok(status(&st))
     }
 
     // ---- listings ----
 
     pub async fn list_inbox(&self) -> Result<Vec<PrSummary>> {
-        self.ensure_auth().await?;
+        let gen = self.ensure_auth().await?.generation;
         let (review, authored) = futures::future::join(
             self.gh.search_prs(
                 "is:open is:pr review-requested:@me archived:false",
@@ -242,16 +264,16 @@ impl Service {
         )
         .await;
         let (review, authored) = self
-            .on_err(review.and_then(|r| authored.map(|a| (r, a))))
+            .on_err(gen, review.and_then(|r| authored.map(|a| (r, a))))
             .await?;
         Ok(merge_inbox(review, authored))
     }
 
     pub async fn search_repos(&self, query: &str) -> Result<Vec<RepoSummary>> {
-        self.ensure_auth().await?;
+        let gen = self.ensure_auth().await?.generation;
         let query = query.trim();
         if query.is_empty() {
-            let mine = self.on_err(self.cached_user_repos().await).await?;
+            let mine = self.on_err(gen, self.cached_user_repos().await).await?;
             return Ok(mine.iter().take(30).cloned().collect());
         }
         let search_q = match query.split_once('/') {
@@ -287,11 +309,11 @@ impl Service {
                 }
             }
             // Search has a tight rate limit; local matches are still useful.
-            Err(e) if out.is_empty() => return self.on_err(Err(e)).await,
+            Err(e) if out.is_empty() => return self.on_err(gen, Err(e)).await,
             Err(_) => {}
         }
         if out.is_empty() {
-            self.on_err(mine).await?;
+            self.on_err(gen, mine).await?;
         }
         out.truncate(50);
         Ok(out)
@@ -309,9 +331,12 @@ impl Service {
     }
 
     pub async fn list_repo_prs(&self, owner: &str, repo: &str) -> Result<Vec<PrSummary>> {
-        let viewer = self.ensure_auth().await?;
-        self.on_err(self.gh.list_repo_prs(owner, repo, Some(&viewer)).await)
-            .await
+        let session = self.ensure_auth().await?;
+        let prs = self
+            .gh
+            .list_repo_prs(owner, repo, Some(&session.login))
+            .await;
+        self.on_err(session.generation, prs).await
     }
 
     // ---- PR ----
@@ -322,23 +347,30 @@ impl Service {
         repo: &str,
         number: u64,
     ) -> Result<PrDetail> {
-        self.ensure_auth().await?;
-        let (pr, rest_files) = futures::future::join(
-            self.gh.pr_graphql(owner, repo, number),
-            self.gh.pr_files_rest(owner, repo, number),
-        )
-        .await;
-        let mut pr = match pr {
+        let gen = self.ensure_auth().await?.generation;
+        let seq = self.pr_seq.fetch_add(1, Ordering::Relaxed) + 1;
+        let mut pr = match self.gh.pr_graphql(owner, repo, number).await {
             Ok(mut pr) => {
-                // Rename info is cosmetic for the list but needed for the old side of the diff;
-                // tolerate failure.
-                let renames: HashMap<String, String> = rest_files
-                    .unwrap_or_default()
-                    .into_iter()
-                    .filter_map(|f| Some((f.path, f.previous_path?)))
-                    .collect();
-                for f in &mut pr.files {
-                    f.previous_path = renames.get(&f.path).cloned();
+                // GraphQL has no previous path; the old side of a rename/copy diff needs it,
+                // so fetch the REST list only then, and fail rather than show a wrong diff.
+                let has_renames = pr
+                    .files
+                    .iter()
+                    .any(|f| matches!(f.status, FileStatus::Renamed | FileStatus::Copied));
+                if has_renames {
+                    let rest = self
+                        .gh
+                        .pr_files_rest(owner, repo, number, pr.changed_files)
+                        .await;
+                    let renames: HashMap<String, String> = self
+                        .on_err(gen, rest)
+                        .await?
+                        .into_iter()
+                        .filter_map(|f| Some((f.path, f.previous_path?)))
+                        .collect();
+                    for f in &mut pr.files {
+                        f.previous_path = renames.get(&f.path).cloned();
+                    }
                 }
                 pr
             }
@@ -347,13 +379,20 @@ impl Service {
             Err(e) if graphql_fallback_ok(&e) => {
                 warn_rest_fallback(&e);
                 let meta = self.gh.pr_rest(owner, repo, number).await;
-                let mut pr = self.on_err(meta).await?;
-                pr.files = self.on_err(rest_files).await?;
+                let mut pr = self.on_err(gen, meta).await?;
+                let files = self
+                    .gh
+                    .pr_files_rest(owner, repo, number, pr.changed_files)
+                    .await;
+                pr.files = self.on_err(gen, files).await?;
                 pr
             }
-            Err(e) => return self.on_err(Err(e)).await,
+            Err(e) => return self.on_err(gen, Err(e)).await,
         };
         pr.files.sort_unstable_by(|a, b| a.path.cmp(&b.path));
+        let listed = u32::try_from(pr.files.len()).unwrap_or(u32::MAX);
+        let total_files = pr.changed_files.unwrap_or(listed).max(listed);
+        let files_truncated = pr.truncated || total_files > listed;
 
         let key: PrKey = (owner.to_owned(), repo.to_owned(), number);
         let merge_base = {
@@ -366,6 +405,7 @@ impl Service {
             }
         };
         let info = Arc::new(PrInfo {
+            seq,
             base_sha: pr.base_ref_oid.clone(),
             head_sha: pr.head_ref_oid.clone(),
             files: pr
@@ -375,7 +415,13 @@ impl Service {
                 .collect(),
             merge_base,
         });
-        lock(&self.prs).insert(key, info.clone());
+        {
+            // Overlapping fetches can finish out of order; keep the one that started last.
+            let mut prs = lock(&self.prs);
+            if prs.get(&key).is_none_or(|old| old.seq < seq) {
+                prs.insert(key, info.clone());
+            }
+        }
 
         // Warm the merge base so the first diff doesn't pay for it.
         if !info.merge_base.initialized() {
@@ -399,6 +445,8 @@ impl Service {
             base_sha: pr.base_ref_oid,
             head_sha: pr.head_ref_oid,
             files: pr.files,
+            total_files,
+            files_truncated,
         })
     }
 
@@ -445,12 +493,15 @@ impl Service {
         number: u64,
         path: &str,
     ) -> Result<Arc<FileDiff>> {
+        // Also re-resolves a token cleared by an earlier 401 and refuses cached diffs after sign-out.
+        let gen = self.ensure_auth().await?.generation;
         let info = self.pr_info(owner, repo, number).await?;
         let key = DiffKey {
             owner: owner.to_owned(),
             repo: repo.to_owned(),
             number,
             path: path.to_owned(),
+            old_path: info.files.get(path).and_then(|(old, _)| old.clone()),
             base_sha: info.base_sha.clone(),
             head_sha: info.head_sha.clone(),
         };
@@ -479,7 +530,7 @@ impl Service {
                 .clone()
         };
         let res = fut.await;
-        self.on_err(res).await
+        self.on_err(gen, res).await
     }
 
     async fn compute_diff(&self, key: &DiffKey, info: &PrInfo) -> Result<FileDiff> {
@@ -493,14 +544,14 @@ impl Service {
 
         let old_fut = async {
             if status == FileStatus::Added {
-                return Ok(None);
+                return Ok(Content::Missing);
             }
             let base = self.merge_base(owner, repo, info).await?;
             self.content(owner, repo, &base, old_path_ref).await
         };
         let new_fut = async {
             if status == FileStatus::Removed {
-                return Ok(None);
+                return Ok(Content::Missing);
             }
             self.content(owner, repo, &info.head_sha, path).await
         };
@@ -517,21 +568,26 @@ impl Service {
             old_text: None,
             new_text: None,
         };
-        let sides = [old.as_deref(), new.as_deref()];
-        if sides.iter().flatten().any(|b| diff::is_binary(b)) {
+        let sides = [&old, &new];
+        // A too-large side still holds its first bytes, enough to detect binary content.
+        if sides.iter().filter_map(|c| c.bytes()).any(diff::is_binary) {
             out.binary = true;
             return Ok(out);
         }
-        if sides
-            .iter()
-            .flatten()
-            .any(|b| b.len() > MAX_DIFF_BYTES || line_count(b) > MAX_DIFF_LINES)
-        {
+        if sides.iter().any(|c| match c {
+            Content::Missing => false,
+            Content::TooLarge(_) => true,
+            Content::Bytes(b) => b.len() > MAX_DIFF_BYTES || line_count(b) > MAX_DIFF_LINES,
+        }) {
             out.too_large = true;
             return Ok(out);
         }
-        let old_text = old.map(into_string);
-        let new_text = new.map(into_string);
+        let text = |c: Content| match c {
+            Content::Bytes(b) => Some(into_string(b)),
+            Content::Missing | Content::TooLarge(_) => None,
+        };
+        let old_text = text(old);
+        let new_text = text(new);
         // Diffing is CPU-bound; keep it off the async workers.
         let (hunks, old_text, new_text) = tokio::task::spawn_blocking(move || {
             let hunks = diff::diff_texts(
@@ -549,27 +605,29 @@ impl Service {
         Ok(out)
     }
 
-    /// File contents at a commit, via the disk cache.
-    async fn content(
-        &self,
-        owner: &str,
-        repo: &str,
-        sha: &str,
-        path: &str,
-    ) -> Result<Option<Vec<u8>>> {
+    /// File contents at a commit, via the disk cache. Files over `MAX_DIFF_BYTES` are not
+    /// downloaded in full and not cached (they are never diffed).
+    async fn content(&self, owner: &str, repo: &str, sha: &str, path: &str) -> Result<Content> {
         let repo_key = format!("{owner}/{repo}");
         if let Some(hit) = self.blobs.get(&repo_key, sha, path).await {
-            return Ok(hit);
+            return Ok(hit.map_or(Content::Missing, Content::Bytes));
         }
-        let bytes = self.gh.file_content(owner, repo, sha, path).await?;
-        self.blobs.put(&repo_key, sha, path, bytes.as_deref()).await;
-        Ok(bytes)
+        let content = self
+            .gh
+            .file_content(owner, repo, sha, path, MAX_DIFF_BYTES)
+            .await?;
+        match &content {
+            Content::Missing => self.blobs.put(&repo_key, sha, path, None).await,
+            Content::Bytes(b) => self.blobs.put(&repo_key, sha, path, Some(b)).await,
+            Content::TooLarge(_) => {}
+        }
+        Ok(content)
     }
 
     pub async fn set_file_viewed(&self, pr_id: &str, path: &str, viewed: bool) -> Result<()> {
-        self.ensure_auth().await?;
-        self.on_err(self.gh.set_file_viewed(pr_id, path, viewed).await)
-            .await
+        let gen = self.ensure_auth().await?.generation;
+        let res = self.gh.set_file_viewed(pr_id, path, viewed).await;
+        self.on_err(gen, res).await
     }
 
     /// Number of diffs in the in-memory cache (for tests / diagnostics).

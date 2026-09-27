@@ -44,6 +44,18 @@ describe("keyToAction", () => {
     expect(isTypingTarget(document.createElement("div"))).toBe(false);
     expect(isTypingTarget(null)).toBe(false);
   });
+
+  it("does not treat a focused checkbox or button input as typing", () => {
+    const input = (type: string) => Object.assign(document.createElement("input"), { type });
+    // The toolbar "Viewed" checkbox keeps focus after a click on WebKitGTK.
+    expect(isTypingTarget(input("checkbox"))).toBe(false);
+    expect(isTypingTarget(input("radio"))).toBe(false);
+    expect(isTypingTarget(input("button"))).toBe(false);
+    expect(isTypingTarget(input("range"))).toBe(false);
+    expect(isTypingTarget(input("text"))).toBe(true);
+    expect(isTypingTarget(input("search"))).toBe(true);
+    expect(isTypingTarget(input("password"))).toBe(true);
+  });
 });
 
 describe("nextUnviewed", () => {

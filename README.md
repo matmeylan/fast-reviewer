@@ -7,11 +7,11 @@ A fast desktop app for reviewing GitHub pull requests: a file tree on the left, 
 ## Features
 
 - **PR picker** (`⌘K`): PRs waiting for your review and your own PRs. You can also fuzzy-search your repos and browse their open PRs, or paste a PR URL or `owner/repo#123`.
-- **File tree**: folders first, then files, both alphabetical. Single-child folder chains are compacted (`src/lib/utils`). Each file shows its `+N −M` counts, status (A/M/D/R) and a viewed tick, and the header shows progress. Filter with `/`.
+- **File tree**: folders first, then files, both alphabetical. Single-child folder chains are compacted (`src/lib/utils`). Each file shows its `+N −M` counts, status (A/M/D/R) and a viewed tick, and the header shows progress. Filter with `/`. GitHub lists at most 3,000 files per PR; for larger PRs the sidebar shows a "Showing N of M files" warning.
 - **Diff**: split (side by side) or unified view. Changed lines are tinted, and the exact characters that changed inside a modified line get a stronger highlight. You can expand hidden context around hunks.
-- **Syntax highlighting**: VS Code-quality highlighting (Shiki / TextMate grammars) for TypeScript, TSX, JavaScript, HTML, CSS, Python, JSON, Markdown, Rust, Go and more than 200 other languages. Grammars load on demand and highlighting runs in a Web Worker, so it never blocks scrolling.
-- **GitHub sync**: "viewed" state is read from GitHub and written back in the background. It is the same checkbox as on github.com. If the write fails, the change is undone and a message is shown.
-- **Speed**: the next files' diffs are fetched ahead of time, so `r` and `s` switch files in under 20 ms. Only visible rows are rendered, which keeps 5,000-line diffs smooth. Diffs are computed in Rust and cached in memory, and file contents are cached on disk by commit SHA.
+- **Syntax highlighting**: VS Code-quality highlighting (Shiki / TextMate grammars) for TypeScript, TSX, JavaScript, HTML, CSS, Python, JSON, Markdown, Rust, Go and more than 200 other languages. Highlighting runs in a Web Worker, so it never blocks scrolling. Grammars load on demand; when a PR opens, the grammars for its languages are loaded and warmed while the first diff is fetched.
+- **GitHub sync**: "viewed" state is read from GitHub and written back in the background. It is the same checkbox as on github.com. If the write fails, the change is undone and a message is shown. If GitHub's GraphQL API is unavailable (some proxies and GHE setups), PRs load over REST instead; REST has no viewed state, so every file starts unviewed.
+- **Speed**: the diffs of the next 3 unviewed files are fetched ahead of time, so `r` and `s` switch files in under 20 ms. Only visible rows are rendered, which keeps 5,000-line diffs smooth. Diffs are computed in Rust and cached in memory, and file contents are cached on disk by commit SHA.
 - Light and dark mode follow the system setting.
 
 ## Keyboard shortcuts
@@ -62,7 +62,7 @@ pnpm tauri build                 # macOS: target/release/bundle/macos/Fast Revie
 pnpm tauri build --no-bundle     # just the binary: target/release/fast-reviewer
 ```
 
-The mock backend is used automatically outside Tauri. It serves a 28-file fixture PR, a 2,400-file PR and a 3,000-line generated file. Flags: `?mock=unauth` starts signed out, and `?mock=failviewed` makes viewed-sync fail.
+The mock backend is used automatically outside Tauri. It serves a 28-file fixture PR, a 2,400-file PR and a 3,000-line generated file. Flags: `?mock=unauth` starts signed out, `?mock=failviewed` makes viewed-sync fail, and `?mockViewedDelay=<ms>` makes viewed-sync take that long.
 
 ## Tests
 
@@ -73,7 +73,8 @@ pnpm typecheck
 pnpm test                                       # Vitest unit tests
 pnpm e2e                                        # Playwright end-to-end tests (mock backend)
 cargo test --release -p fast_reviewer_core --test diff_perf -- --ignored --nocapture   # diff timings
-GH_TOKEN=... cargo run -p fast_reviewer_core --example smoke -- <owner> <repo> <number> # read-only check against real GitHub
+GH_TOKEN=... cargo run -p fast_reviewer_core --example smoke -- <owner> <repo> <number> # read-only timing check against real GitHub
+GH_TOKEN=... cargo run -p fast_reviewer_core --example compare_git -- <owner> <repo> <number> [<clone>]  # compare our diffs with `git diff`
 ```
 
 `src/lib/contract.fixture.json` is shared by `crates/core/tests/contract.rs` and `src/lib/contract.test.ts`. This keeps the Rust serde output and the TypeScript types in `src/lib/types.ts` in sync.

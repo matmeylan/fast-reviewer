@@ -10,6 +10,11 @@ export default function MainPane(props: { store: AppStore }) {
     const sel = s.selected();
     return p && sel ? p.files.find((f) => f.path === sel) ?? null : null;
   };
+  /** Line counts for the file whose diff is on screen (it may lag the selection briefly). */
+  const statsFor = (path: string) => {
+    const f = s.pr()?.files.find((x) => x.path === path);
+    return f ? { additions: f.additions, deletions: f.deletions } : undefined;
+  };
   const viewed = () => {
     const f = file();
     return f ? !!s.viewed[f.path] : false;
@@ -85,7 +90,14 @@ export default function MainPane(props: { store: AppStore }) {
             </div>
           </Match>
           <Match when={s.diff().diff}>
-            {(d) => <DiffView diff={d()} mode={s.mode()} hunkNav={s.hunkNav()} />}
+            {(d) => (
+              <DiffView
+                diff={d()}
+                mode={s.mode()}
+                hunkNav={s.hunkNav()}
+                stats={d().tooLarge ? statsFor(d().path) : undefined}
+              />
+            )}
           </Match>
           <Match when={s.pr() && s.pr()!.files.length === 0}>
             <div class="placeholder muted">This pull request has no changed files.</div>

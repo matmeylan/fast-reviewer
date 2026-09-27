@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import DiffView, { ROW_HEIGHT } from "./DiffView";
-import { buildRows, emptyExpansion, splitTextLines } from "./diff-rows";
+import { anchorRow, buildRows, emptyExpansion, splitTextLines, type Row } from "./diff-rows";
 import type { DiffLine, FileDiff, Hunk } from "../lib/types";
 
 afterEach(cleanup);
@@ -137,5 +137,66 @@ describe("DiffView", () => {
     expect(renderMs).toBeLessThan(250);
     expect(switchMs).toBeLessThan(150);
     console.info(`5000-line diff: build ${buildMs.toFixed(1)}ms, render ${renderMs.toFixed(1)}ms, mode switch ${switchMs.toFixed(1)}ms`);
+  });
+
+  it("keeps the first visible source line anchored across split <-> unified switches", () => {
+    const diff = bigDiff(5000);
+    const lines = splitTextLines(diff.newText!);
+    const split = buildRows(diff, "split", emptyExpansion(2), lines).rows;
+    const unified = buildRows(diff, "unified", emptyExpansion(2), lines).rows;
+    const firstLine = (r: Row) =>
+      r.t === "pair" ? (r.left ?? r.right)! : r.t === "line" ? r.line : null;
+
+    const [mode, setMode] = createSignal<"split" | "unified">("split");
+    const { container } = render(() => <DiffView diff={diff} mode={mode()} />);
+    const scroller = container.querySelector<HTMLElement>(".dv-scroll")!;
+    const scrollTo = (px: number) => {
+      scroller.scrollTop = px;
+      scroller.dispatchEvent(new Event("scroll"));
+    };
+
+    // Deep in the file, 7px into row 1500 of the split view.
+    const row = 1500;
+    scrollTo(row * ROW_HEIGHT + 7);
+    const anchor = firstLine(split[row])!;
+    setMode("unified");
+    const u = Math.floor(scroller.scrollTop / ROW_HEIGHT);
+    expect(u).toBeGreaterThan(row); // unified has more rows above the same line
+    expect(firstLine(unified[u])).toEqual(anchor);
+    expect(scroller.scrollTop - u * ROW_HEIGHT).toBe(7);
+    // The rendered rows follow the new position.
+    const rendered = [...container.querySelectorAll(".dr .ln")].map((el) => el.textContent);
+    expect(rendered).toContain(String(anchor.oldNo));
+
+    // And back: the exact original position.
+    setMode("split");
+    expect(scroller.scrollTop).toBe(row * ROW_HEIGHT + 7);
+  });
+});
+
+describe("anchorRow", () => {
+  const ctx = (no: number): DiffLine => ({ kind: "context", oldNo: no, newNo: no, text: "", segments: null });
+  const del = (no: number): DiffLine => ({ kind: "del", oldNo: no, newNo: null, text: "", segments: null });
+  const add = (no: number): DiffLine => ({ kind: "add", oldNo: null, newNo: no, text: "", segments: null });
+  const hunk: FileDiff = {
+    ...base,
+    hunks: [{ oldStart: 1, oldLines: 4, newStart: 1, newLines: 3, lines: [ctx(1), del(2), del(3), add(2), ctx(4)] }],
+  };
+  hunk.hunks[0].lines[4] = { ...ctx(4), newNo: 3 };
+  const split = buildRows(hunk, "split", emptyExpansion(2), null).rows;
+  const unified = buildRows(hunk, "unified", emptyExpansion(2), null).rows;
+
+  it("maps rows to the row showing the same line in the other mode", () => {
+    // split: @@ [ctx1] [del2|add2] [del3|-] [ctx4]; unified: @@ ctx1 del2 del3 add2 ctx4
+    expect(split).toHaveLength(5);
+    expect(unified).toHaveLength(6);
+    expect(anchorRow(split, 0, unified)).toBe(0); // hunk header
+    expect(anchorRow(split, 1, unified)).toBe(1);
+    expect(anchorRow(split, 2, unified)).toBe(2);
+    expect(anchorRow(split, 3, unified)).toBe(3);
+    expect(anchorRow(split, 4, unified)).toBe(5);
+    expect(anchorRow(unified, 4, split)).toBe(2); // add2 sits beside del2
+    expect(anchorRow(unified, 5, split)).toBe(4);
+    expect(anchorRow(unified, 99, split)).toBeUndefined();
   });
 });

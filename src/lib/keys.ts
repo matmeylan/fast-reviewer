@@ -50,10 +50,25 @@ export function keyToAction(e: KeyLike, typing: boolean): Action | null {
   return PLAIN_KEYS[e.key] ?? null;
 }
 
+/** Input types that take no text: plain shortcuts keep working while they have focus. */
+const NON_TEXT_INPUTS = new Set([
+  "checkbox",
+  "radio",
+  "button",
+  "submit",
+  "reset",
+  "range",
+  "color",
+  "file",
+  "image",
+  "hidden",
+]);
+
 export function isTypingTarget(el: EventTarget | null): boolean {
   if (!(el instanceof HTMLElement)) return false;
   const tag = el.tagName;
-  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el.isContentEditable === true;
+  if (tag === "INPUT") return !NON_TEXT_INPUTS.has((el as HTMLInputElement).type);
+  return tag === "TEXTAREA" || tag === "SELECT" || el.isContentEditable === true;
 }
 
 export interface NavState {

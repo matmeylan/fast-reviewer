@@ -3,8 +3,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Backend } from "./api";
 import { createMockBackend } from "./mock";
 import { nextUnviewed } from "./keys";
-import { createAppStore, PREFETCH, type AppStore } from "./store";
+import { createAppStore, DIFF_CACHE_MAX, PREFETCH, type AppStore } from "./store";
+import type { PrDetail } from "./types";
 
+const SWAP_WAIT = 100;
 const tick = (ms = 5) => new Promise((r) => setTimeout(r, ms));
 
 function setup(backend: Backend = createMockBackend({ latencyMs: 0 })) {
@@ -292,6 +294,89 @@ describe("r never waits for GitHub", () => {
     await tick();
     expect(store.viewed[path]).toBe(false);
     expect(store.toasts()).toHaveLength(1);
+    dispose();
+  });
+});
+
+describe("PR switching", () => {
+  it("ignores review and navigation keys while another PR is loading", async () => {
+    const backend = createMockBackend({ latencyMs: 0 });
+    const { store, dispose } = setup(backend);
+    await openMain(store);
+    const before = store.selected()!;
+    const viewedSpy = vi.spyOn(backend, "setFileViewed");
+    let release!: () => void;
+    const realGetPr = backend.getPr;
+    backend.getPr = (...args) => new Promise<void>((r) => (release = r)).then(() => realGetPr(...args));
+    const opening = store.openPr({ owner: "acme", repo: "api", number: 91 });
+    expect(store.prLoading()).not.toBeNull();
+    for (const a of ["review", "toggleViewed", "skip", "next", "prev", "toggleMode"] as const) store.dispatch(a);
+    expect(viewedSpy).not.toHaveBeenCalled();
+    expect(store.viewed[before]).toBe(false);
+    expect(store.selected()).toBe(before);
+    expect(store.mode()).toBe("split");
+    // The picker still opens.
+    store.dispatch("picker");
+    expect(store.overlay()).toBe("picker");
+    release();
+    await opening;
+    expect(store.pr()!.repo).toBe("api");
+    dispose();
+  });
+
+  it("drops a slow diff from the previous PR when the new PR has no files", async () => {
+    const backend = createMockBackend({ latencyMs: 0 });
+    const { store, dispose } = setup(backend);
+    await openMain(store);
+    const realGetFileDiff = backend.getFileDiff;
+    let release!: () => void;
+    backend.getFileDiff = (...args) => new Promise<void>((r) => (release = r)).then(() => realGetFileDiff(...args));
+    // The last file of PR A is outside the prefetch window, so its diff is not cached yet.
+    const slow = store.order()[store.order().length - 1];
+    store.select(slow);
+    expect(store.diff().path).not.toBe(slow);
+    const realGetPr = backend.getPr;
+    backend.getPr = async (...args): Promise<PrDetail> => ({ ...(await realGetPr(...args)), files: [] });
+    await store.openPr({ owner: "acme", repo: "api", number: 91 });
+    await tick(SWAP_WAIT);
+    release();
+    await tick();
+    expect(store.pr()!.files).toHaveLength(0);
+    expect(store.diff()).toEqual({ path: null, diff: null, loading: false, error: null });
+    dispose();
+  });
+});
+
+describe("diff cache", () => {
+  it("keeps at most DIFF_CACHE_MAX diffs and re-fetches evicted ones", async () => {
+    const backend = createMockBackend({ latencyMs: 0 });
+    const spy = vi.spyOn(backend, "getFileDiff");
+    const { store, dispose } = setup(backend);
+    await store.init();
+    await store.openPr({ owner: "acme", repo: "monorepo", number: 9000 });
+    await tick();
+    const order = store.order();
+    const first = order[0];
+    store.select(first);
+    await tick();
+    // Walk well past the cache size.
+    for (let i = 1; i <= DIFF_CACHE_MAX * 2; i++) {
+      store.select(order[i]);
+      await tick(1);
+    }
+    await tick();
+    const calls = (p: string) => spy.mock.calls.filter((c) => c[3] === p).length;
+    expect(calls(first)).toBe(1);
+    // A recent file is still cached: no new request, shown synchronously.
+    const recent = order[DIFF_CACHE_MAX * 2 - 1];
+    store.select(recent);
+    expect(store.diff().diff?.path).toBe(recent);
+    expect(calls(recent)).toBe(1);
+    // The first file was evicted: it is fetched again.
+    store.select(first);
+    expect(calls(first)).toBe(2);
+    await tick();
+    expect(store.diff().diff?.path).toBe(first);
     dispose();
   });
 });

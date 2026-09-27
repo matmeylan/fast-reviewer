@@ -891,6 +891,8 @@ export function createMockBackend(opts: MockOptions = optionsFromLocation()): Ba
       baseSha: hash(key + "base").toString(16).padStart(8, "0"),
       headSha: hash(key + "head").toString(16).padStart(8, "0"),
       files,
+      totalFiles: files.length,
+      filesTruncated: false,
     };
     const lp = { detail, specs, diffs };
     loaded.set(key, lp);
