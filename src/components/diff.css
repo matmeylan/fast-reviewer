@@ -26,9 +26,11 @@
   min-width: 0;
   background: var(--dv-bg);
   color: var(--dv-fg);
-  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
-  font-size: 12px;
+  font-family: var(--font-mono);
+  font-size: 13px;
   line-height: 20px;
+  /* JetBrains IDEs ship with ligatures off; keep "!=" and "=>" as typed. */
+  font-variant-ligatures: none;
   tab-size: 4;
   -moz-tab-size: 4;
 }

@@ -10,7 +10,7 @@ A native desktop app (macOS first, Linux later) for reviewing GitHub pull reques
 | Core | **Rust** crate `crates/core` (`fast_reviewer_core`) | GitHub API, auth, diffing, caching. No Tauri dependency so it can be unit-tested and reused (CLI, Linux). |
 | Tauri glue | `src-tauri` | Thin `#[tauri::command]` wrappers over the core. |
 | UI | **SolidJS + TypeScript + Vite** | Fine-grained reactivity, no VDOM, tiny runtime. |
-| Styling | **Tailwind CSS v4** with the shadcn/ui preset `b1YocDISu` (Nova style, Mist base, Cyan theme, Geist, Lucide icons) | shadcn/ui is React-only, so `src/components/ui/` holds Solid ports of the Nova components we use. Theme tokens live in `src/styles.css`; the diff view keeps its own stylesheet (`src/components/diff.css`) and reads the theme tokens for its chrome. |
+| Styling | **Tailwind CSS v4** with the shadcn/ui preset `b1YocDISu` (Nova style, Mist base, Cyan theme, Geist, Lucide icons); code in JetBrains Mono | shadcn/ui is React-only, so `src/components/ui/` holds Solid ports of the Nova components we use. Theme tokens live in `src/styles.css`; the diff view keeps its own stylesheet (`src/components/diff.css`) and reads the theme tokens for its chrome. |
 | Highlighting | **Shiki** (TextMate grammars, JS regex engine) running in a **Web Worker** | VS Code-quality highlighting for 200+ languages without blocking the UI thread. Languages load lazily. |
 
 ## Data flow
