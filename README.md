@@ -52,11 +52,38 @@ Every push runs `.github/workflows/ci.yml`: lint and all tests on Linux, plus a 
 - **Latest build:** open the repo's *Actions* tab → the latest *CI* run → download the `fast-reviewer-macos` artifact (`.dmg` and a zipped `.app`).
 - **Releases:** push a tag like `v0.1.0` and CI publishes a GitHub Release with the `.dmg` attached.
 
-The app is ad-hoc signed, not notarized, so macOS Gatekeeper blocks it on first launch. After copying it to Applications, run once:
+When the Apple signing secrets below are set, CI signs the app with your Developer ID and notarizes it with Apple, so it opens normally. Without them, the build is only ad-hoc signed and macOS refuses to open the downloaded app.
 
-```sh
-xattr -dr com.apple.quarantine "/Applications/Fast Reviewer.app"
-```
+### Code signing and notarization (one-time setup)
+
+You need a paid Apple Developer Program membership.
+
+1. **Create a Developer ID certificate.** On your Mac: Xcode → Settings → Accounts → select your team → *Manage Certificates…* → **+** → **Developer ID Application**. (Or create it at developer.apple.com → Certificates, using a CSR from Keychain Access.)
+2. **Export it as .p12.** Keychain Access → *login* → *My Certificates* → right-click **Developer ID Application: Your Name (TEAMID)** → *Export…* → save as `cert.p12` with a strong password. Then copy it as base64:
+   ```sh
+   base64 -i cert.p12 | pbcopy
+   ```
+3. **Find the exact identity name:**
+   ```sh
+   security find-identity -v -p codesigning
+   # → "Developer ID Application: Your Name (TEAMID1234)"
+   ```
+4. **Create an App Store Connect API key for notarization** (recommended): appstoreconnect.apple.com → *Users and Access* → *Integrations* → *App Store Connect API* → *Team Keys* → **+**, role **Developer**. Download `AuthKey_<KEYID>.p8` (only downloadable once) and note the **Key ID** and **Issuer ID**.
+5. **Add repository secrets** (GitHub → repo → *Settings* → *Secrets and variables* → *Actions* → *New repository secret*):
+
+   | Secret | Value |
+   |---|---|
+   | `APPLE_CERTIFICATE` | base64 of `cert.p12` (step 2) |
+   | `APPLE_CERTIFICATE_PASSWORD` | the .p12 export password |
+   | `APPLE_SIGNING_IDENTITY` | `Developer ID Application: Your Name (TEAMID1234)` (step 3) |
+   | `APPLE_API_ISSUER` | Issuer ID (step 4) |
+   | `APPLE_API_KEY` | Key ID (step 4) |
+   | `APPLE_API_KEY_P8` | full contents of `AuthKey_<KEYID>.p8`, including the BEGIN/END lines |
+
+   Alternative to the API key: `APPLE_ID` (your Apple ID email), `APPLE_PASSWORD` (an [app-specific password](https://account.apple.com) → Sign-In and Security → App-Specific Passwords) and `APPLE_TEAM_ID`.
+6. **Re-run CI** (Actions → CI → *Run workflow*, or push). The macOS job signs, notarizes and staples both the `.app` and the `.dmg`, then fails the build if Gatekeeper (`spctl`) would reject them.
+
+Delete `cert.p12` and the `.p8` from your disk once the secrets are saved.
 
 ## Development
 

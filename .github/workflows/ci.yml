@@ -76,17 +76,20 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
 
-      - name: Build .app and .dmg
-        run: pnpm tauri build --target universal-apple-darwin --bundles app,dmg
-
-      - name: Collect artifacts
-        run: |
-          mkdir -p out
-          cp target/universal-apple-darwin/release/bundle/dmg/*.dmg out/
-          # Zip the .app too (preserves the bundle's symlinks and signature).
-          cd target/universal-apple-darwin/release/bundle/macos
-          ditto -c -k --keepParent "Fast Reviewer.app" "$GITHUB_WORKSPACE/out/Fast-Reviewer-macOS-universal.app.zip"
-          ls -la "$GITHUB_WORKSPACE/out"
+      - name: Build, sign and notarize .app and .dmg
+        run: scripts/ci/macos-build.sh
+        env:
+          OUT_DIR: out
+          # Unset secrets (forks, first setup) fall back to an ad-hoc signed build.
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
 
       - uses: actions/upload-artifact@v4
         with:
