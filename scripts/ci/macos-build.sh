@@ -86,6 +86,14 @@ if [ "$signed" = 1 ]; then
   codesign --verify --deep --strict -vv "$APP"
 fi
 
+# Step outputs for the release job (only notarized builds are published).
+if [ -n "${GITHUB_OUTPUT:-}" ]; then
+  echo "version=$(node -p "require('./src-tauri/tauri.conf.json').version")" >> "$GITHUB_OUTPUT"
+  if [ "$signed" = 1 ] && [ ${#notary[@]} -gt 0 ]; then
+    echo "notarized=true" >> "$GITHUB_OUTPUT"
+  fi
+fi
+
 mkdir -p "$OUT"
 cp "$DMG" "$OUT/"
 # Zip the .app too (ditto keeps symlinks, signature and stapled ticket).

@@ -9,7 +9,8 @@ on:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # Never cancel a main run midway: it may be publishing a release.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   test:
@@ -61,6 +62,9 @@ jobs:
   build-macos:
     name: Build macOS app (universal)
     runs-on: macos-14
+    outputs:
+      notarized: ${{ steps.build.outputs.notarized }}
+      version: ${{ steps.build.outputs.version }}
     steps:
       - uses: actions/checkout@v4
 
@@ -77,6 +81,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - name: Build, sign and notarize .app and .dmg
+        id: build
         run: scripts/ci/macos-build.sh
         env:
           OUT_DIR: out
@@ -99,7 +104,12 @@ jobs:
 
   release:
     name: Publish release
-    if: startsWith(github.ref, 'refs/tags/v')
+    # Version tags (v*) and every push to main. Only notarized builds are published:
+    # an unnotarized DMG can't be opened after download.
+    if: >-
+      github.event_name == 'push' &&
+      (startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main') &&
+      needs.build-macos.outputs.notarized == 'true'
     needs: [test, build-macos]
     runs-on: ubuntu-24.04
     permissions:
@@ -112,8 +122,17 @@ jobs:
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.build-macos.outputs.version }}
         run: |
-          gh release create "$GITHUB_REF_NAME" out/* \
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            tag="$GITHUB_REF_NAME"
+          else
+            # Tags created with GITHUB_TOKEN don't trigger another CI run.
+            tag="v${VERSION}-build.${GITHUB_RUN_NUMBER}"
+          fi
+          gh release create "$tag" out/* \
             --repo "$GITHUB_REPOSITORY" \
-            --title "Fast Reviewer $GITHUB_REF_NAME" \
-            --generate-notes
+            --target "$GITHUB_SHA" \
+            --title "Fast Reviewer $tag" \
+            --generate-notes \
+            --latest

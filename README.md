@@ -50,7 +50,7 @@ For GitHub Enterprise, set `GITHUB_API_URL` (for example `https://ghe.example.co
 Every push runs `.github/workflows/ci.yml`: lint and all tests on Linux, plus a universal macOS build (Apple Silicon + Intel).
 
 - **Latest build:** open the repo's *Actions* tab → the latest *CI* run → download the `fast-reviewer-macos` artifact (`.dmg` and a zipped `.app`).
-- **Releases:** push a tag like `v0.1.0` and CI publishes a GitHub Release with the `.dmg` attached.
+- **Releases:** every push to `main` publishes a GitHub Release (`v<version>-build.<run>`, marked *Latest*) with the notarized `.dmg`; pushing a tag like `v0.2.0` publishes one under that name. Releases are only created when the build was signed and notarized.
 
 When the Apple signing secrets below are set, CI signs the app with your Developer ID and notarizes it with Apple, so it opens normally. Without them, the build is only ad-hoc signed and macOS refuses to open the downloaded app.
 
