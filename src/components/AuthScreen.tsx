@@ -1,5 +1,5 @@
 import { createSignal, Show } from "solid-js";
-import KeyRound from "lucide-solid/icons/key-round";
+import logoUrl from "../../assets/logo.svg";
 import { errorMessage, type AppStore } from "../lib/store";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "./ui/card";
@@ -31,9 +31,7 @@ export default function AuthScreen(props: { store: AppStore }) {
       <form class="w-full max-w-md select-text" onSubmit={submit}>
         <Card data-size="lg">
           <CardHeader>
-            <div class="mb-2 grid size-10 place-items-center rounded-lg bg-primary/10 text-primary dark:bg-primary/25 dark:text-foreground">
-              <KeyRound class="size-5" />
-            </div>
+            <img class="mb-2 block" src={logoUrl} alt="" width="64" height="64" draggable={false} />
             <CardTitle class="text-lg">Sign in to GitHub</CardTitle>
             <CardDescription>
               Fast Reviewer needs a token to read pull requests and mark files as viewed. It looks for one

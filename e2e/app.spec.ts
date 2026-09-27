@@ -44,6 +44,19 @@ async function openMainPr(page: Page, query = "") {
   await expect(page.getByTestId("tree-file")).toHaveCount(ORDER.length);
 }
 
+test("shows the logo and welcome state until a PR is opened", async ({ page }) => {
+  await page.goto("/");
+  const welcome = page.getByTestId("welcome");
+  await expect(welcome).toContainText("Fast Reviewer");
+  // The logo image actually loaded (not a broken image).
+  await expect
+    .poll(() => welcome.locator("img").evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0))
+    .toBe(true);
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("tree-file").first()).toBeVisible();
+  await expect(welcome).toHaveCount(0);
+});
+
 test("opens a PR and renders the tree in visual order", async ({ page }) => {
   await openMainPr(page);
   const paths = await page.getByTestId("tree-file").evaluateAll((els) => els.map((e) => e.getAttribute("data-path")));

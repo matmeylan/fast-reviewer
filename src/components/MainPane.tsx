@@ -1,4 +1,5 @@
 import { Match, Show, Switch } from "solid-js";
+import logoUrl from "../../assets/logo.svg";
 import type { AppStore } from "../lib/store";
 import DiffView from "./DiffView";
 import { Counts } from "./FileTree";
@@ -99,6 +100,18 @@ export default function MainPane(props: { store: AppStore }) {
                 Loading {ref().owner}/{ref().repo}#{ref().number}…
               </div>
             )}
+          </Match>
+          <Match when={!s.pr()}>
+            {/* Shown under the picker, which stays open while no PR is loaded. */}
+            <Empty class="h-full justify-end pb-[12vh]" data-testid="welcome">
+              <EmptyHeader>
+                <img src={logoUrl} alt="" width="96" height="96" class="mb-2" draggable={false} />
+                <EmptyTitle class="text-lg">Fast Reviewer</EmptyTitle>
+                <EmptyDescription>
+                  <Kbd>{isMac ? "⌘K" : "Ctrl K"}</Kbd> to open a pull request
+                </EmptyDescription>
+              </EmptyHeader>
+            </Empty>
           </Match>
           <Match when={s.done()}>
             <Empty class="h-full" data-testid="all-reviewed">
