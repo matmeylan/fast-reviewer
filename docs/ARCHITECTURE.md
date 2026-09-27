@@ -1,0 +1,54 @@
+# Fast Reviewer — architecture
+
+A native desktop app (macOS first, Linux later) for reviewing GitHub pull requests fast.
+
+## Stack
+
+| Layer | Choice | Why |
+|---|---|---|
+| Shell | **Tauri 2** | Native webview (WKWebView on macOS, WebKitGTK on Linux), ~10 MB binary, instant startup. Cross-platform. |
+| Core | **Rust** crate `crates/core` (`fast_reviewer_core`) | GitHub API, auth, diffing, caching. No Tauri dependency so it can be unit-tested and reused (CLI, Linux). |
+| Tauri glue | `src-tauri` | Thin `#[tauri::command]` wrappers over the core. |
+| UI | **SolidJS + TypeScript + Vite** | Fine-grained reactivity, no VDOM, tiny runtime. |
+| Highlighting | **Shiki** (TextMate grammars, JS regex engine) running in a **Web Worker** | VS Code-quality highlighting for 200+ languages without blocking the UI thread. Languages load lazily. |
+
+## Data flow
+
+1. `auth_status` resolves a token in order: `GH_TOKEN`/`GITHUB_TOKEN` env → `gh auth token` → OS keychain (`keyring` crate, service `fast-reviewer`). `set_token` stores a PAT in the keychain.
+2. `list_inbox` → PRs where review is requested from the viewer + PRs authored by the viewer (GitHub search API).
+3. `get_pr(owner, repo, number)` → one GraphQL query: PR metadata + all `files { path additions deletions changeType viewerViewedState }` (paginated). REST `pulls/{n}/files` supplies `previous_filename` for renames.
+4. `get_file_diff(owner, repo, number, path)` → fetch base + head blobs (by SHA, cached on disk under the OS cache dir keyed by blob SHA; blobs are immutable so cache never invalidates), compute the diff in Rust with `similar` (Patience/Myers), 3 lines of context, pair del/add lines inside a change block and compute intra-line word-level segments (UTF-16 offsets).
+5. `set_file_viewed(prId, path, viewed)` → GraphQL `markFileAsViewed` / `unmarkFileAsViewed`. The UI updates optimistically and rolls back on failure.
+
+## Speed rules
+
+- The UI prefetches diffs for the next 3 files, so `r` / `s` move to an already-loaded diff.
+- Rust keeps an in-memory LRU of computed `FileDiff`s; blobs are also cached on disk.
+- Diff rows are virtualized (only visible rows are in the DOM).
+- Highlighting runs off the main thread. Plain text renders first, then tokens swap in.
+- One shared `reqwest::Client` (HTTP/2, rustls, keep-alive).
+
+## Keyboard
+
+| Key | Action |
+|---|---|
+| `r` | Mark file viewed on GitHub (in the background) and go to next file |
+| `s` | Skip: go to next file |
+| `j` / `k` (or ↓/↑ in tree) | Next / previous file |
+| `u` | Toggle viewed on the current file |
+| `v` | Toggle split / unified view |
+| `n` / `p` | Next / previous hunk |
+| `⌘K` / `Ctrl+K` | Open PR picker |
+| `o` | Open the PR in the browser |
+| `?` | Shortcut help |
+
+## Layout
+
+- Left: file tree. Folders sorted alphabetically before files, both alphabetical; single-child folder chains are compacted (`src/lib/utils`). Each file shows `+N −M` and a viewed checkmark. Header shows progress (viewed/total).
+- Right: selected file diff, split (side by side) or unified. Added/removed lines are tinted; the exact changed characters within a modified line get a stronger highlight.
+
+## Testing
+
+- `cargo test -p fast_reviewer_core` — diff engine, tree/sort, GitHub client against a mock HTTP server.
+- `pnpm test` — Vitest unit tests (tree building, keyboard reducer, highlighting helpers).
+- `pnpm e2e` — Playwright against the Vite dev server. Outside Tauri, `src/lib/api.ts` uses an in-memory mock backend (`src/lib/mock.ts`), so the full UI can be exercised in a browser.
