@@ -238,9 +238,12 @@ function DiffBody(props: DiffViewProps) {
     onCleanup(() => scroller.removeEventListener("wheel", onWheel));
     document.addEventListener("selectionchange", onSelectionChange);
     document.addEventListener("copy", onCopy);
+    // selectionchange is async: Cmd+F can arrive first. Capture runs before the shell's handler.
+    window.addEventListener("keydown", updateSelOrigin, true);
     onCleanup(() => {
       document.removeEventListener("selectionchange", onSelectionChange);
       document.removeEventListener("copy", onCopy);
+      window.removeEventListener("keydown", updateSelOrigin, true);
     });
     measureCode();
   });
@@ -272,12 +275,17 @@ function DiffBody(props: DiffViewProps) {
     const sel = document.getSelection();
     const anchor = sel && !sel.isCollapsed ? rowOf(sel.anchorNode) : -1;
     setPin(anchor >= 0 ? anchor : null);
-
-    const r = diffSelection();
-    if (!r) {
+    if (!diffSelection()) {
       if (sel?.anchorNode && scroller.contains(sel.anchorNode)) selOrigin = null;
       return;
     }
+    updateSelOrigin();
+  };
+
+  /** Set selOrigin from the live selection, if it is in this diff. */
+  const updateSelOrigin = () => {
+    const r = diffSelection();
+    if (!r) return;
     const row = rowOf(r.startContainer);
     if (row < 0) return;
     const start = r.startContainer;

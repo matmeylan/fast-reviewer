@@ -265,7 +265,8 @@ test("diff code can be selected and copied, one side at a time", async ({ page }
   await file(page, "src/components/Button.tsx").click();
   const view = page.locator('.diff-view[data-path="src/components/Button.tsx"]');
   const newCode = view.locator('.dc[data-side="new"] .dt');
-  await expect(newCode.first()).toBeVisible();
+  // Highlighting re-renders the lines when it arrives, which drops a selection: wait for it.
+  await expect.poll(() => view.locator(".dt span[class*='k']").count()).toBeGreaterThan(20);
   const a = (await newCode.nth(0).boundingBox())!;
   const b = (await newCode.nth(2).boundingBox())!;
   await page.mouse.move(a.x + 1, a.y + a.height / 2);
@@ -295,7 +296,8 @@ test("Ctrl+F finds in the diff: Enter steps, Esc closes, a selection prefills", 
   await openMainPr(page);
   await file(page, "src/components/Button.tsx").click();
   const view = page.locator('.diff-view[data-path="src/components/Button.tsx"]');
-  await expect(view.locator(".dt").first()).toBeVisible();
+  // Highlighting re-renders the lines when it arrives, which drops a selection: wait for it.
+  await expect.poll(() => view.locator(".dt span[class*='k']").count()).toBeGreaterThan(20);
 
   await page.keyboard.press("Control+f");
   const input = page.getByTestId("find-input");
