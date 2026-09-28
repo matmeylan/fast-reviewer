@@ -7,6 +7,7 @@ import type { AuthStatus, FileDiff, PrDetail, PrSummary } from "./types";
 import { buildTree, filterFiles, flattenFiles, isAncestor, type DirNode } from "./tree";
 import { nextUnviewed, reduce, upcomingUnviewed, type Action, type Mode, type Overlay } from "./keys";
 import { prefetchHighlight, warmHighlighter } from "./highlight-client";
+import type { FindStatus } from "../components/diff-find";
 import { languageForPath, languagesOf } from "./language";
 
 export interface PrRef {
@@ -85,6 +86,13 @@ export function createAppStore(backend: Backend) {
   const [diff, setDiff] = createSignal<DiffState>({ path: null, diff: null, loading: false, error: null });
   const [hunkNav, setHunkNav] = createSignal<{ dir: 1 | -1; seq: number } | undefined>();
   const [focusFilterSeq, setFocusFilterSeq] = createSignal(0);
+  // Find in file: the query outlives the bar (reopening restores it) and file switches.
+  const [findOpen, setFindOpen] = createSignal(false);
+  const [findQuery, setFindQuery] = createSignal("");
+  const [findCase, setFindCase] = createSignal(false);
+  const [findNav, setFindNav] = createSignal<{ dir: 1 | -1; seq: number } | undefined>();
+  const [focusFindSeq, setFocusFindSeq] = createSignal(0);
+  const [findStatus, setFindStatus] = createSignal<FindStatus>({ count: 0, index: -1 });
   const [toasts, setToasts] = createSignal<Toast[]>([]);
 
   const fullTree = createMemo<DirNode | null>(() => {
@@ -372,6 +380,7 @@ export function createAppStore(backend: Backend) {
         mode: mode(),
         overlay: pickerOpen() ? "picker" : overlay(),
         done: done(),
+        findOpen: findOpen(),
       },
       action,
     );
@@ -381,6 +390,7 @@ export function createAppStore(backend: Backend) {
         if (u.overlay === "picker") void refreshInbox();
       }
       if (u.mode) setMode(u.mode);
+      if (u.findOpen !== undefined) setFindOpen(u.findOpen);
       for (const e of u.effects) {
         if (e.type === "setViewed") markViewed(e.path, e.viewed);
         else if (e.type === "nextHunk") setHunkNav((h) => ({ dir: 1, seq: (h?.seq ?? 0) + 1 }));
@@ -389,6 +399,11 @@ export function createAppStore(backend: Backend) {
           const p = pr();
           if (p) backend.openUrl(p.url).catch((err) => toast(`Couldn't open browser: ${errorMessage(err)}`));
         } else if (e.type === "focusFilter") setFocusFilterSeq((n) => n + 1);
+        else if (e.type === "focusFind") setFocusFindSeq((n) => n + 1);
+        else if (e.type === "findNav") {
+          const dir = e.dir;
+          setFindNav((f) => ({ dir, seq: (f?.seq ?? 0) + 1 }));
+        }
       }
       if (u.done !== undefined) setDone(u.done);
     });
@@ -419,6 +434,12 @@ export function createAppStore(backend: Backend) {
     diff,
     hunkNav,
     focusFilterSeq,
+    findOpen,
+    findQuery,
+    findCase,
+    findNav,
+    focusFindSeq,
+    findStatus,
     toasts,
     tree,
     order,
@@ -434,6 +455,10 @@ export function createAppStore(backend: Backend) {
     setMode,
     setFilter,
     setOverlay,
+    setFindOpen,
+    setFindQuery,
+    setFindCase,
+    setFindStatus,
     toggleCollapsed: (dir: string) => setCollapsed(dir, (c) => !c),
     retryDiff,
     toast,

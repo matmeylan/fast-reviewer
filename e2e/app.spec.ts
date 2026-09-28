@@ -259,3 +259,72 @@ test("diff shows syntax colors and intra-line highlights", async ({ page }) => {
   );
   expect(colors).toBeGreaterThan(3);
 });
+
+test("diff code can be selected and copied, one side at a time", async ({ page }) => {
+  await openMainPr(page);
+  await file(page, "src/components/Button.tsx").click();
+  const view = page.locator('.diff-view[data-path="src/components/Button.tsx"]');
+  const newCode = view.locator('.dc[data-side="new"] .dt');
+  await expect(newCode.first()).toBeVisible();
+  const a = (await newCode.nth(0).boundingBox())!;
+  const b = (await newCode.nth(2).boundingBox())!;
+  await page.mouse.move(a.x + 1, a.y + a.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(b.x + 60, b.y + b.height / 2, { steps: 8 });
+  await page.mouse.up();
+  await expect(view).toHaveAttribute("data-sel", "new");
+  expect(await page.evaluate(() => document.getSelection()!.toString())).not.toBe("");
+
+  const copied = await page.evaluate(() => {
+    let text = "";
+    addEventListener("copy", (e) => (text = (e as ClipboardEvent).clipboardData!.getData("text/plain")), {
+      once: true,
+    });
+    document.execCommand("copy");
+    return text;
+  });
+  const lines = copied.split("\n");
+  expect(lines).toHaveLength(3);
+  expect(lines[0]).toBe(await newCode.nth(0).textContent());
+  expect(lines[1]).toBe(await newCode.nth(1).textContent());
+  expect(lines[2].length).toBeGreaterThan(0);
+  expect((await newCode.nth(2).textContent())!.startsWith(lines[2])).toBe(true);
+});
+
+test("Ctrl+F finds in the diff: Enter steps, Esc closes, a selection prefills", async ({ page }) => {
+  await openMainPr(page);
+  await file(page, "src/components/Button.tsx").click();
+  const view = page.locator('.diff-view[data-path="src/components/Button.tsx"]');
+  await expect(view.locator(".dt").first()).toBeVisible();
+
+  await page.keyboard.press("Control+f");
+  const input = page.getByTestId("find-input");
+  const status = page.getByTestId("find-status");
+  await expect(input).toBeFocused();
+  await input.pressSequentially("variant");
+  await expect(status).toHaveText(/^1 of \d+$/);
+  const total = Number((await status.textContent())!.split(" of ")[1]);
+  expect(total).toBeGreaterThan(3);
+  await expect(view.locator(".fc").first()).toHaveText(/variant/i);
+  await page.keyboard.press("Enter");
+  await expect(status).toHaveText(`2 of ${total}`);
+  await page.keyboard.press("Shift+Enter");
+  await page.keyboard.press("Shift+Enter");
+  await expect(status).toHaveText(`${total} of ${total}`);
+  // Typing in the bar does not trigger review shortcuts.
+  await expect(page.getByTestId("current-path")).toHaveText("src/components/Button.tsx");
+
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("find-bar")).toBeHidden();
+  await expect(view.locator(".fm")).toHaveCount(0);
+
+  // Selecting the second "splitProps" and pressing Ctrl+F finds that occurrence.
+  const second = view.locator('.dc[data-side="new"] .dt', { hasText: "splitProps(" }).getByText("splitProps");
+  await second.dblclick();
+  expect(await page.evaluate(() => document.getSelection()!.toString())).toBe("splitProps");
+  await page.keyboard.press("Control+f");
+  await expect(input).toHaveValue("splitProps");
+  await expect(status).toHaveText("2 of 2");
+  await expect(view.locator(".fc")).toHaveText("splitProps");
+  await expect(view.locator(".dt", { has: page.locator(".fc") })).toContainText("splitProps(props");
+});

@@ -86,22 +86,63 @@ export function styleClass(style: number): string {
   return cls;
 }
 
+/** Find matches on one line: sorted, non-overlapping [start, end) ranges, and which one is current (-1: none). */
+export interface LineHits {
+  ranges: readonly (readonly [number, number])[];
+  current: number;
+}
+
+/** 0: no match, 1: a find match, 2: the current find match. */
+type Hit = 0 | 1 | 2;
+
+/** Split spans at find match boundaries and tag each piece with its match state. */
+export function splitAtHits(spans: readonly Span[], hits: LineHits): (Span & { hit: Hit })[] {
+  const out: (Span & { hit: Hit })[] = [];
+  const { ranges, current } = hits;
+  let h = 0;
+  for (const sp of spans) {
+    let pos = sp.start;
+    while (pos < sp.end) {
+      while (h < ranges.length && ranges[h][1] <= pos) h++;
+      let end = sp.end;
+      let hit: Hit = 0;
+      if (h < ranges.length) {
+        const [s, e] = ranges[h];
+        if (s <= pos) {
+          hit = h === current ? 2 : 1;
+          end = Math.min(end, e);
+        } else end = Math.min(end, s);
+      }
+      out.push({ ...sp, start: pos, end, hit });
+      pos = end;
+    }
+  }
+  return out;
+}
+
+const HIT_CLASS = ["", "fm", "fm fc"];
+
 /**
  * Render one line to HTML. Styled spans get `k<n>`; marked spans get `x`, plus
- * `xl` / `xr` on the left / right edge of each contiguous marked run.
+ * `xl` / `xr` on the left / right edge of each contiguous marked run. Find
+ * matches get `fm`, and the current one also `fc`.
  */
 export function renderLineHtml(
   text: string,
   tokens: ArrayLike<number> | null,
   segments: readonly (readonly [number, number])[] | null,
+  hits: LineHits | null = null,
 ): string {
-  if (!tokens && !segments) return escapeHtml(text);
-  const spans = mergeSpans(text.length, tokens, segments);
+  if (hits && hits.ranges.length === 0) hits = null;
+  if (!tokens && !segments && !hits) return escapeHtml(text);
+  const merged = mergeSpans(text.length, tokens, segments);
+  const spans = hits ? splitAtHits(merged, hits) : merged;
   let html = "";
   for (let i = 0; i < spans.length; i++) {
     const sp = spans[i];
+    const hit = hits ? (sp as Span & { hit: Hit }).hit : 0;
     const body = escapeHtml(text.slice(sp.start, sp.end));
-    if (sp.style < 0 && !sp.mark) {
+    if (sp.style < 0 && !sp.mark && !hit) {
       html += body;
       continue;
     }
@@ -111,6 +152,7 @@ export function renderLineHtml(
       if (i === 0 || !spans[i - 1].mark) cls += " xl";
       if (i === spans.length - 1 || !spans[i + 1].mark) cls += " xr";
     }
+    if (hit) cls = cls ? cls + " " + HIT_CLASS[hit] : HIT_CLASS[hit];
     html += `<span class="${cls}">${body}</span>`;
   }
   return html;

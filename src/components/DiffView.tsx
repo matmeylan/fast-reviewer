@@ -1,14 +1,16 @@
 // OWNER: diff-view agent. Contract used by the app shell:
-// <DiffView diff mode hunkNav /> renders one file's diff, virtualized, with
-// syntax highlighting swapped in from the highlight worker when ready.
+// <DiffView diff mode hunkNav find findNav onFindStatus /> renders one file's
+// diff, virtualized, with syntax highlighting swapped in from the highlight
+// worker when ready, find-in-file matches highlighted, and selectable code.
 import { createEffect, createMemo, createSignal, For, Match, on, onCleanup, onMount, Show, Switch, untrack } from "solid-js";
 import type { DiffLine, FileDiff } from "../lib/types";
 import type { ThemeName } from "../lib/highlight-protocol";
-import { renderLineHtml, paletteCss } from "../lib/highlight-merge";
+import { renderLineHtml, paletteCss, type LineHits } from "../lib/highlight-merge";
 import { colorScheme, highlightDiff, paletteOf, tokensFor, type Side } from "../lib/highlight-client";
 import {
   anchorRow,
   buildRows,
+  cols,
   computeGaps,
   emptyExpansion,
   expandGap,
@@ -18,6 +20,7 @@ import {
   type Row,
   type RowModel,
 } from "./diff-rows";
+import { findMatches, matchFrom, sameMatch, stepMatch, type FindMatch, type FindOptions, type FindStatus } from "./diff-find";
 import "./diff.css";
 
 export type DiffMode = "split" | "unified";
@@ -31,11 +34,19 @@ export interface DiffViewProps {
   theme?: ThemeName;
   /** Line stats, shown for files too large to display. */
   stats?: { additions: number; deletions: number };
+  /** Text to find in the file; matches are highlighted. Omit while the find bar is closed. */
+  find?: FindOptions;
+  /** Incremented by the shell to step to the next (+1) / previous (-1) find match. */
+  findNav?: { dir: 1 | -1; seq: number };
+  /** Reports the number of find matches and the current one (-1: none yet). */
+  onFindStatus?: (status: FindStatus) => void;
 }
 
 export const ROW_HEIGHT = 20;
 const OVERSCAN = 20;
 const CODE_PAD = 32;
+/** Farthest (in rows) a selection's anchor row is kept rendered while scrolled away. */
+const PIN_MAX = 2000;
 
 const linesCache = new WeakMap<FileDiff, string[] | null>();
 function newTextLines(diff: FileDiff): string[] | null {
@@ -78,6 +89,7 @@ export default function DiffView(props: DiffViewProps) {
 
 function DiffBody(props: DiffViewProps) {
   let scroller!: HTMLDivElement;
+  let rowsEl!: HTMLDivElement;
   let hbar!: HTMLDivElement;
   let measure!: HTMLSpanElement;
 
@@ -106,26 +118,55 @@ function DiffBody(props: DiffViewProps) {
   const tokens = () => highlight().tokens();
   const palette = createMemo(() => paletteCss(paletteOf(tokens()), ".diff-view"));
 
+  // --- Find -------------------------------------------------------------------
+  const matches = createMemo(() => (props.find ? findMatches(model().rows, props.find) : []));
+  /** Index into matches(), or -1 before the user has stepped to one. */
+  const [current, setCurrent] = createSignal(-1);
+  const matchesByLine = createMemo(() => {
+    const map = new Map<DiffLine, number[]>();
+    matches().forEach((m, i) => {
+      const list = map.get(m.line);
+      if (list) list.push(i);
+      else map.set(m.line, [i]);
+    });
+    return map;
+  });
+
   // Rendered HTML per line, invalidated when tokens change.
   const htmlCache = createMemo(() => {
     tokens();
     return { old: new WeakMap<DiffLine, string>(), new: new WeakMap<DiffLine, string>() };
   });
+  const lineTokens = (line: DiffLine, side: Side) => {
+    const t = tokens();
+    // Context lines take new-side tokens on both sides so they color identically.
+    return line.kind === "context"
+      ? tokensFor(t, "new", line.newNo) ?? tokensFor(t, "old", line.oldNo)
+      : tokensFor(t, side, side === "old" ? line.oldNo : line.newNo);
+  };
   const lineHtml = (line: DiffLine, side: Side): string => {
+    const found = matchesByLine().get(line);
+    if (found) {
+      // Few lines match, and the current match moves: render these fresh.
+      const ms = matches();
+      const hits: LineHits = { ranges: found.map((i) => [ms[i].start, ms[i].end]), current: found.indexOf(current()) };
+      return renderLineHtml(line.text, lineTokens(line, side), line.segments, hits);
+    }
     const cache = htmlCache()[side];
     let html = cache.get(line);
     if (html === undefined) {
-      const t = tokens();
-      // Context lines take new-side tokens on both sides so they color identically.
-      const lt =
-        line.kind === "context"
-          ? tokensFor(t, "new", line.newNo) ?? tokensFor(t, "old", line.oldNo)
-          : tokensFor(t, side, side === "old" ? line.oldNo : line.newNo);
-      html = renderLineHtml(line.text, lt, line.segments);
+      html = renderLineHtml(line.text, lineTokens(line, side), line.segments);
       cache.set(line, html);
     }
     return html;
   };
+
+  // --- Text selection -----------------------------------------------------------
+  // Rows scrolled out of view leave the DOM, which would drop a selection anchored
+  // in them, so the anchor row stays rendered while the selection lives.
+  const [pin, setPin] = createSignal<number | null>(null);
+  // In split view a selection stays on the side it started on.
+  const [selSide, setSelSide] = createSignal<Side | null>(null);
 
   // --- Virtualization -----------------------------------------------------
   const [scrollTop, setScrollTop] = createSignal(0);
@@ -134,8 +175,13 @@ function DiffBody(props: DiffViewProps) {
     () => {
       const n = model().rows.length;
       const first = Math.floor(scrollTop() / ROW_HEIGHT);
-      const start = Math.max(0, first - OVERSCAN);
-      const end = Math.min(n, first + Math.ceil(viewHeight() / ROW_HEIGHT) + 1 + OVERSCAN);
+      let start = Math.max(0, first - OVERSCAN);
+      let end = Math.min(n, first + Math.ceil(viewHeight() / ROW_HEIGHT) + 1 + OVERSCAN);
+      const p = pin();
+      if (p !== null && p < n && Math.abs(p - first) <= PIN_MAX) {
+        start = Math.min(start, p);
+        end = Math.max(end, p + 1);
+      }
       return { start, end };
     },
     undefined,
@@ -190,8 +236,93 @@ function DiffBody(props: DiffViewProps) {
     };
     scroller.addEventListener("wheel", onWheel, { passive: false });
     onCleanup(() => scroller.removeEventListener("wheel", onWheel));
+    document.addEventListener("selectionchange", onSelectionChange);
+    document.addEventListener("copy", onCopy);
+    onCleanup(() => {
+      document.removeEventListener("selectionchange", onSelectionChange);
+      document.removeEventListener("copy", onCopy);
+    });
     measureCode();
   });
+
+  /** The selection's range when it is a non-empty one inside this diff. */
+  const diffSelection = (): Range | null => {
+    const sel = document.getSelection();
+    if (!sel || sel.isCollapsed || sel.rangeCount === 0) return null;
+    const r = sel.getRangeAt(0);
+    return scroller.contains(r.commonAncestorContainer) ? r : null;
+  };
+
+  /** Model row index of the rendered row containing `node`, or -1. */
+  const rowOf = (node: Node | null): number => {
+    const el = node && scroller.contains(node) ? (node instanceof Element ? node : node.parentElement) : null;
+    const dr = el?.closest(".dr");
+    return dr && dr.parentElement === rowsEl ? untrack(range).start + Array.prototype.indexOf.call(rowsEl.children, dr) : -1;
+  };
+
+  /**
+   * Where the last selection in the diff starts. A new find query starts there,
+   * so Cmd+F on a selected word makes that occurrence the current match. It
+   * outlives the selection moving into the find input; a click in the diff or
+   * a find step clears it.
+   */
+  let selOrigin: { model: RowModel; row: number; line: DiffLine | null; offset: number } | null = null;
+
+  const onSelectionChange = () => {
+    const sel = document.getSelection();
+    const anchor = sel && !sel.isCollapsed ? rowOf(sel.anchorNode) : -1;
+    setPin(anchor >= 0 ? anchor : null);
+
+    const r = diffSelection();
+    if (!r) {
+      if (sel?.anchorNode && scroller.contains(sel.anchorNode)) selOrigin = null;
+      return;
+    }
+    const row = rowOf(r.startContainer);
+    if (row < 0) return;
+    const start = r.startContainer;
+    const dt = (start instanceof Element ? start : start.parentElement)?.closest(".dt");
+    const m = untrack(model);
+    const shown = m.rows[row];
+    const side = dt?.parentElement?.getAttribute("data-side");
+    const line =
+      !dt || !shown ? null : shown.t === "line" ? shown.line : shown.t === "pair" ? (side === "old" ? shown.left : shown.right) : null;
+    let offset = 0;
+    if (dt) {
+      const before = document.createRange();
+      before.setStart(dt, 0);
+      before.setEnd(start, r.startOffset);
+      offset = before.toString().length;
+    }
+    selOrigin = { model: m, row, line, offset };
+  };
+
+  // Copy the selected code only: one line per row, no line numbers, and in split
+  // view only the side the selection started on.
+  const onCopy = (e: ClipboardEvent) => {
+    const sel = diffSelection();
+    if (!sel || !e.clipboardData) return;
+    const side = props.mode === "split" ? selSide() : null;
+    const parts: string[] = [];
+    for (const dt of rowsEl.querySelectorAll<HTMLElement>(".dt")) {
+      if (!sel.intersectsNode(dt)) continue;
+      if (side && dt.parentElement?.getAttribute("data-side") !== side) continue;
+      const r = document.createRange();
+      r.selectNodeContents(dt);
+      if (sel.compareBoundaryPoints(Range.START_TO_START, r) > 0) r.setStart(sel.startContainer, sel.startOffset);
+      if (sel.compareBoundaryPoints(Range.END_TO_END, r) < 0) r.setEnd(sel.endContainer, sel.endOffset);
+      parts.push(r.toString());
+    }
+    if (parts.length === 0) return;
+    e.clipboardData.setData("text/plain", parts.join("\n"));
+    e.preventDefault();
+  };
+
+  const onMouseDown = (e: MouseEvent) => {
+    if (e.shiftKey || e.button !== 0) return;
+    const dc = (e.target as Element | null)?.closest?.(".dc");
+    setSelSide((dc?.getAttribute("data-side") as Side | null) ?? null);
+  };
 
   createEffect(on(() => props.mode, () => requestAnimationFrame(measureCode), { defer: true }));
 
@@ -246,6 +377,73 @@ function DiffBody(props: DiffViewProps) {
     ),
   );
 
+  const topRow = () => Math.floor(untrack(scrollTop) / ROW_HEIGHT);
+  const bottomRow = () => Math.floor((untrack(scrollTop) + untrack(viewHeight)) / ROW_HEIGHT);
+
+  /** Scroll a match into view: vertically centered if off screen, horizontally if clipped. */
+  const revealMatch = (m: FindMatch) => {
+    const top = m.row * ROW_HEIGHT;
+    const h = scroller.clientHeight || untrack(viewHeight);
+    if (top < scroller.scrollTop || top + ROW_HEIGHT > scroller.scrollTop + h) {
+      scroller.scrollTop = Math.max(0, top - Math.floor((h - ROW_HEIGHT) / 2));
+      setScrollTop(scroller.scrollTop);
+    }
+    const cw = untrack(charWidth);
+    const x0 = cols(m.line.text.slice(0, m.start)) * cw;
+    const x1 = cols(m.line.text.slice(0, m.end)) * cw;
+    const w = untrack(codeWidth);
+    const sx = untrack(scrollX);
+    if (x0 < sx || x1 > sx + w) {
+      hbar.scrollLeft = Math.min(untrack(maxScrollX), Math.max(0, Math.round(x0 - w / 3)));
+      setScrollX(hbar.scrollLeft);
+    }
+  };
+
+  // Keep the current match across rebuilt rows; a new query moves to its first
+  // match from where the last one was (or the top of the view) and shows it.
+  let lastFind: { diff: FileDiff | null; matches: FindMatch[]; opts?: FindOptions } = { diff: null, matches: [] };
+  createEffect(
+    on(matches, (ms) => {
+      const prev = lastFind;
+      const opts = props.find;
+      lastFind = { diff: props.diff, matches: ms, opts };
+      const was = prev.matches[untrack(current)] as FindMatch | undefined;
+      let next = -1;
+      if (ms.length === 0 || prev.diff !== props.diff) {
+        // A new file starts unpositioned: the next step goes to the first match in view.
+      } else if (opts?.query === prev.opts?.query && opts?.caseSensitive === prev.opts?.caseSensitive) {
+        next = was ? ms.findIndex((m) => sameMatch(m, was)) : -1;
+      } else {
+        const o = selOrigin && selOrigin.model === untrack(model) ? selOrigin : null;
+        if (o) {
+          const exact = o.line ? ms.findIndex((m) => m.line === o.line && m.start === o.offset) : -1;
+          next = exact >= 0 ? exact : matchFrom(ms, o.row, o.offset);
+        } else next = was ? matchFrom(ms, was.row, was.start) : stepMatch(ms, -1, 1, topRow(), bottomRow());
+        revealMatch(ms[next]);
+      }
+      setCurrent(next);
+    }),
+  );
+
+  createEffect(
+    on(
+      () => props.findNav?.seq,
+      () => {
+        const nav = props.findNav;
+        const ms = matches();
+        if (!nav || ms.length === 0) return;
+        selOrigin = null;
+        const i = stepMatch(ms, current(), nav.dir, topRow(), bottomRow());
+        setCurrent(i);
+        revealMatch(ms[i]);
+      },
+      { defer: true },
+    ),
+  );
+
+  createEffect(() => props.onFindStatus?.({ count: matches().length, index: current() }));
+  onCleanup(() => props.onFindStatus?.({ count: 0, index: -1 }));
+
   const gutterCh = () => Math.max(3, String(model().maxLineNo).length) + 2;
 
   const LineCell = (p: { line: DiffLine | null; side: Side }) => {
@@ -255,7 +453,7 @@ function DiffBody(props: DiffViewProps) {
     return (
       <>
         <span class={`ln ${line.kind}`}>{no ?? ""}</span>
-        <div class={`dc ${line.kind}`}>
+        <div class={`dc ${line.kind}`} data-side={p.side}>
           <div class="dt" innerHTML={lineHtml(line, p.side)} />
         </div>
       </>
@@ -329,15 +527,21 @@ function DiffBody(props: DiffViewProps) {
       classList={{ split: props.mode === "split", unified: props.mode !== "split" }}
       data-theme={theme()}
       data-path={props.diff.path}
+      data-sel={selSide() ?? undefined}
       style={{ "--gw": `${gutterCh()}ch`, "--sx": `${scrollX()}px` }}
     >
       <style>{palette()}</style>
       <span class="dv-measure" ref={measure} aria-hidden="true">
         {"0".repeat(64)}
       </span>
-      <div class="dv-scroll" ref={scroller} onScroll={() => setScrollTop(scroller.scrollTop)}>
+      <div
+        class="dv-scroll"
+        ref={scroller}
+        onScroll={() => setScrollTop(scroller.scrollTop)}
+        onMouseDown={onMouseDown}
+      >
         <div class="dv-spacer" style={{ height: `${model().rows.length * ROW_HEIGHT}px` }}>
-          <div class="dv-rows" style={{ transform: `translateY(${range().start * ROW_HEIGHT}px)` }}>
+          <div class="dv-rows" ref={rowsEl} style={{ transform: `translateY(${range().start * ROW_HEIGHT}px)` }}>
             <For each={visible()}>{(row) => <RowView row={row} />}</For>
           </div>
         </div>

@@ -10,7 +10,8 @@ A fast desktop app for reviewing GitHub pull requests: a file tree on the left, 
 
 - **PR picker** (`⌘K`): PRs waiting for your review and your own PRs. You can also fuzzy-search your repos and browse their open PRs, or paste a PR URL or `owner/repo#123`.
 - **File tree**: folders first, then files, both alphabetical. Single-child folder chains are compacted (`src/lib/utils`). Styled after JetBrains IDEs: each file has its file-type icon (IntelliJ's icon set) and its name is colored by change status (green added, blue modified or renamed, gray struck-through deleted). Viewed files are dimmed with a check mark; hover a row to toggle it. Folders show how many files are left to review, with indent guides. Switch to a flat list with folder paths from the button next to the filter. The header shows progress. Filter with `/`; matches are highlighted. GitHub lists at most 3,000 files per PR; for larger PRs the sidebar shows a "Showing N of M files" warning.
-- **Diff**: split (side by side) or unified view. Changed lines are tinted, and the exact characters that changed inside a modified line get a stronger highlight. You can expand hidden context around hunks.
+- **Diff**: split (side by side) or unified view. Changed lines are tinted, and the exact characters that changed inside a modified line get a stronger highlight. You can expand hidden context around hunks. Code is selectable; copying gives just the code (no line numbers), and in split view only the side you started selecting on.
+- **Find in file** (`⌘F`): highlights every match in the current diff, including lines scrolled out of view; `Enter` / `⇧Enter` (or `⌘G` / `⇧⌘G`) step through them. With text selected in the diff, `⌘F` searches for it, starting at that occurrence. The query stays when you move to another file.
 - **Syntax highlighting**: VS Code-quality highlighting (Shiki / TextMate grammars) for TypeScript, TSX, JavaScript, HTML, CSS, Python, JSON, Markdown, Rust, Go and more than 200 other languages. Highlighting runs in a Web Worker, so it never blocks scrolling. Grammars load on demand; when a PR opens, the grammars for its languages are loaded and warmed while the first diff is fetched.
 - **GitHub sync**: "viewed" state is read from GitHub and written back in the background. It is the same checkbox as on github.com. If the write fails, the change is undone and a message is shown. If GitHub's GraphQL API is unavailable (some proxies and GHE setups), PRs load over REST instead; REST has no viewed state, so every file starts unviewed.
 - **Speed**: the diffs of the next 3 unviewed files are fetched ahead of time, so `r` and `s` switch files in under 20 ms. Only visible rows are rendered, which keeps 5,000-line diffs smooth. Diffs are computed in Rust and cached in memory, and file contents are cached on disk by commit SHA.
@@ -28,10 +29,12 @@ A fast desktop app for reviewing GitHub pull requests: a file tree on the left, 
 | `v` | Toggle split / unified (remembered) |
 | `n` / `p` | Next / previous hunk |
 | `/` | Filter files |
+| `⌘F` / `Ctrl+F` | Find in file (searches for the selected text, if any) |
+| `⌘G` / `⇧⌘G` | Next / previous match (also `Enter` / `⇧Enter` in the find bar) |
 | `o` | Open the PR in the browser |
 | `⌘K` / `Ctrl+K` | Open a pull request |
 | `?` | Show shortcuts |
-| `Esc` | Close overlay / clear filter |
+| `Esc` | Close overlay / find bar / clear filter |
 
 ## Authentication
 

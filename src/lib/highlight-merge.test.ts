@@ -88,6 +88,24 @@ describe("renderLineHtml", () => {
     );
   });
 
+  it("marks find matches across token and change boundaries, the current one apart", () => {
+    // Tokens "let" | " x=1;", changed " x", matches "et" and "=1".
+    const html = renderLineHtml("let x=1;", [3, 0, 5, 1], [[3, 5]], { ranges: [[1, 3], [5, 7]], current: 1 });
+    expect(html).toBe(
+      '<span class="k0">l</span><span class="k0 fm">et</span><span class="k1 x xl xr"> x</span>' +
+        '<span class="k1 fm fc">=1</span><span class="k1">;</span>',
+    );
+    // A match splitting a changed run keeps the run's edges.
+    expect(renderLineHtml("abcd", null, [[0, 4]], { ranges: [[1, 2]], current: -1 })).toBe(
+      '<span class="x xl">a</span><span class="x fm">b</span><span class="x xr">cd</span>',
+    );
+    // Plain text and escaping.
+    expect(renderLineHtml("a<b", null, null, { ranges: [[1, 2]], current: 0 })).toBe(
+      'a<span class="fm fc">&lt;</span>b',
+    );
+    expect(renderLineHtml("a<b", null, null, { ranges: [], current: -1 })).toBe("a&lt;b");
+  });
+
   it("encodes font styles as classes", () => {
     expect(styleClass(3 | (FONT_ITALIC << STYLE_FONT_SHIFT))).toBe("k3 fi");
     expect(escapeHtml("plain")).toBe("plain");

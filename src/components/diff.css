@@ -17,6 +17,8 @@
   --dv-fill: color-mix(in oklab, var(--muted) 60%, var(--background));
   --dv-add-sign: #1a7f37;
   --dv-del-sign: #d1242f;
+  --dv-find: rgba(255, 213, 0, 0.45);
+  --dv-find-cur: #ff9632;
 
   position: relative;
   display: flex;
@@ -47,6 +49,8 @@
   --dv-del-x: rgba(248, 81, 73, 0.45);
   --dv-add-sign: #3fb950;
   --dv-del-sign: #f85149;
+  --dv-find: rgba(187, 128, 9, 0.55);
+  --dv-find-cur: rgba(255, 150, 50, 0.85);
 }
 
 .diff-view.diff-empty {
@@ -122,6 +126,16 @@
   overflow: hidden;
   border-left: 22px solid transparent;
   white-space: pre;
+  /* The app shell disables selection; code is selectable (and copyable). */
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
+}
+.dc.fill,
+.split[data-sel="old"] .dc[data-side="new"],
+.split[data-sel="new"] .dc[data-side="old"] {
+  user-select: none;
+  -webkit-user-select: none;
 }
 .dt {
   transform: translateX(calc(-1 * var(--sx, 0px)));
@@ -142,6 +156,10 @@
 .dc.del .x { background: var(--dv-del-x); }
 .dc .xl { border-top-left-radius: 3px; border-bottom-left-radius: 3px; }
 .dc .xr { border-top-right-radius: 3px; border-bottom-right-radius: 3px; }
+
+/* Find-in-file matches; after the intra-line marks so they win over them. */
+.diff-view .dc .fm { background: var(--dv-find); border-radius: 2px; }
+.diff-view .dc .fc { background: var(--dv-find-cur); color: #1f2328; }
 
 /* Token font styles (colors come from the injected palette). */
 .dt .fi { font-style: italic; }

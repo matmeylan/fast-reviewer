@@ -4,6 +4,7 @@ import { isTypingTarget, keyToAction, type Action } from "./lib/keys";
 import { createAppStore, storage, type AppStore } from "./lib/store";
 import AuthScreen from "./components/AuthScreen";
 import HelpOverlay from "./components/HelpOverlay";
+import { selectedDiffText } from "./components/FindBar";
 import MainPane from "./components/MainPane";
 import Picker from "./components/Picker";
 import Sidebar from "./components/Sidebar";
@@ -20,11 +21,11 @@ const MIN_SIDEBAR = 180;
 const MAX_SIDEBAR = 720;
 const DEFAULT_SIDEBAR = 320;
 /** Actions that make sense to auto-repeat while a key is held. */
-const REPEATABLE = new Set<Action>(["next", "prev", "skip", "nextHunk", "prevHunk"]);
+const REPEATABLE = new Set<Action>(["next", "prev", "skip", "nextHunk", "prevHunk", "findNext", "findPrev"]);
 const isMac = typeof navigator !== "undefined" && /Mac/.test(navigator.platform);
 /** Actions that move within the file list, and ones that work inside the diff. */
 const TREE_ACTIONS = new Set<Action>(["review", "skip", "next", "prev", "toggleViewed", "focusFilter"]);
-const DIFF_ACTIONS = new Set<Action>(["nextHunk", "prevHunk"]);
+const DIFF_ACTIONS = new Set<Action>(["nextHunk", "prevHunk", "find", "findNext", "findPrev"]);
 
 export default function App(props: { backend?: Backend }) {
   const [store, setStore] = createSignal<AppStore | null>(null);
@@ -61,6 +62,10 @@ function Shell(props: { store: AppStore }) {
     e.preventDefault();
     if (TREE_ACTIONS.has(action)) setTreeActive(true);
     else if (DIFF_ACTIONS.has(action)) setTreeActive(false);
+    if (action === "find") {
+      const text = selectedDiffText();
+      if (text) s.setFindQuery(text);
+    }
     s.dispatch(action);
   };
   const onPointerDown = (e: PointerEvent) => {

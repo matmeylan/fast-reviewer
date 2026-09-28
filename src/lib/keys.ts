@@ -14,7 +14,10 @@ export type Action =
   | "picker"
   | "help"
   | "escape"
-  | "focusFilter";
+  | "focusFilter"
+  | "find"
+  | "findNext"
+  | "findPrev";
 
 export type Mode = "split" | "unified";
 export type Overlay = "none" | "picker" | "help";
@@ -24,6 +27,7 @@ export interface KeyLike {
   metaKey?: boolean;
   ctrlKey?: boolean;
   altKey?: boolean;
+  shiftKey?: boolean;
 }
 
 const PLAIN_KEYS: Record<string, Action> = {
@@ -45,6 +49,8 @@ const PLAIN_KEYS: Record<string, Action> = {
 export function keyToAction(e: KeyLike, typing: boolean): Action | null {
   const mod = e.metaKey || e.ctrlKey;
   if (mod && !e.altKey && e.key.toLowerCase() === "k") return "picker";
+  if (mod && !e.altKey && e.key.toLowerCase() === "f") return "find";
+  if (mod && !e.altKey && e.key.toLowerCase() === "g") return e.shiftKey ? "findPrev" : "findNext";
   if (e.key === "Escape") return "escape";
   if (typing || mod || e.altKey) return null;
   return PLAIN_KEYS[e.key] ?? null;
@@ -80,6 +86,8 @@ export interface NavState {
   overlay: Overlay;
   /** "All files reviewed" screen is showing. */
   done: boolean;
+  /** The find-in-file bar is open. */
+  findOpen: boolean;
 }
 
 export type Effect =
@@ -87,13 +95,16 @@ export type Effect =
   | { type: "nextHunk" }
   | { type: "prevHunk" }
   | { type: "openBrowser" }
-  | { type: "focusFilter" };
+  | { type: "focusFilter" }
+  | { type: "focusFind" }
+  | { type: "findNav"; dir: 1 | -1 };
 
 export interface Update {
   current?: string | null;
   mode?: Mode;
   overlay?: Overlay;
   done?: boolean;
+  findOpen?: boolean;
   effects: Effect[];
 }
 
@@ -143,7 +154,10 @@ function step(order: readonly string[], from: string | null, dir: 1 | -1): strin
 
 export function reduce(s: NavState, action: Action): Update {
   if (action === "picker") return { overlay: s.overlay === "picker" ? "none" : "picker", effects: [] };
-  if (action === "escape") return s.overlay !== "none" ? { overlay: "none", effects: [] } : { effects: [] };
+  if (action === "escape") {
+    if (s.overlay !== "none") return { overlay: "none", effects: [] };
+    return s.findOpen ? { findOpen: false, effects: [] } : { effects: [] };
+  }
   if (action === "help") return { overlay: s.overlay === "help" ? "none" : "help", effects: [] };
   if (s.overlay !== "none") return { effects: [] };
 
@@ -179,5 +193,12 @@ export function reduce(s: NavState, action: Action): Update {
       return { effects: [{ type: "openBrowser" }] };
     case "focusFilter":
       return { effects: [{ type: "focusFilter" }] };
+    case "find":
+      return { findOpen: true, effects: [{ type: "focusFind" }] };
+    case "findNext":
+    case "findPrev":
+      // Like a browser: with the bar closed, the first press opens it.
+      if (!s.findOpen) return { findOpen: true, effects: [{ type: "focusFind" }] };
+      return { effects: [{ type: "findNav", dir: action === "findNext" ? 1 : -1 }] };
   }
 }
