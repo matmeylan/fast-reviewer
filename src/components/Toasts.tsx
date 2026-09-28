@@ -1,5 +1,6 @@
 import { For } from "solid-js";
 import CircleAlert from "lucide-solid/icons/circle-alert";
+import Info from "lucide-solid/icons/info";
 import type { AppStore } from "../lib/store";
 
 export default function Toasts(props: { store: AppStore }) {
@@ -12,7 +13,11 @@ export default function Toasts(props: { store: AppStore }) {
             data-testid="toast"
             onClick={() => props.store.dismissToast(t.id)}
           >
-            <CircleAlert class="mt-0.5 size-4 flex-none text-destructive" />
+            {t.kind === "info" ? (
+              <Info class="mt-0.5 size-4 flex-none text-primary" />
+            ) : (
+              <CircleAlert class="mt-0.5 size-4 flex-none text-destructive" />
+            )}
             <span>{t.text}</span>
           </div>
         )}

@@ -27,6 +27,8 @@ export interface DiffState {
 export interface Toast {
   id: number;
   text: string;
+  /** Errors are the default; "info" is for plain news ("You're up to date"). */
+  kind: "error" | "info";
 }
 
 export const SWAP_DELAY_MS = 80;
@@ -113,9 +115,9 @@ export function createAppStore(backend: Backend) {
 
   // --- toasts -------------------------------------------------------------
   let toastSeq = 0;
-  function toast(text: string) {
+  function toast(text: string, kind: Toast["kind"] = "error") {
     const id = ++toastSeq;
-    setToasts((t) => [...t, { id, text }]);
+    setToasts((t) => [...t, { id, text, kind }]);
     setTimeout(() => dismissToast(id), TOAST_MS);
   }
   const dismissToast = (id: number) => setToasts((t) => t.filter((x) => x.id !== id));

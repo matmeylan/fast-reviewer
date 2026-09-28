@@ -94,7 +94,7 @@ Delete `cert.p12` and the `.p8` from your disk once the secrets are saved.
 
 ### In-app updates (one-time setup)
 
-The app checks `latest.json` in the latest GitHub release at startup and every 6 hours. When a newer version is out, an **Update to x.y.z** button shows in the title bar. One click downloads the update, checks its signature, replaces the app and restarts it.
+The app checks `latest.json` in the latest GitHub release at startup and every 6 hours; on macOS, **Fast Reviewer → Check for Updates…** checks right away and says whether you are up to date. When a newer version is out, an **Update to x.y.z** button shows in the title bar. One click downloads the update, checks its signature, replaces the app and restarts it.
 
 Updates are signed with a key of their own, separate from the Apple certificate:
 

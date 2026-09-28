@@ -12,12 +12,17 @@
 //!   open_url(url: String) -> ()
 //! Errors are returned as `String` messages.
 //! Updates go through the updater and process plugins, called from src/lib/updater.ts.
+//! The app menu's "Check for Updates…" item emits `CHECK_UPDATES_EVENT` to the UI.
 use std::sync::Arc;
 
 use fast_reviewer_core::model::{AuthStatus, FileDiff, PrDetail, PrSummary, RepoSummary};
 use fast_reviewer_core::{Config, Service};
-use tauri::State;
+use tauri::menu::{Menu, MenuItem};
+use tauri::{AppHandle, Emitter, Runtime, State};
 use tauri_plugin_opener::OpenerExt;
+
+/// Menu item id, and the event the UI listens to (see src/lib/updater.ts).
+const CHECK_UPDATES_EVENT: &str = "check-for-updates";
 
 type Core<'a> = State<'a, Arc<Service>>;
 type CmdResult<T> = Result<T, String>;
@@ -88,10 +93,41 @@ async fn open_url(app: tauri::AppHandle, url: String) -> CmdResult<()> {
         .map_err(|e| e.to_string())
 }
 
+/// Tauri's default menu with "Check for Updates…" under "About" in the app menu,
+/// where macOS apps put it.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn app_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
+    let menu = Menu::default(app)?;
+    if let Some(app_submenu) = menu
+        .items()?
+        .first()
+        .and_then(|item| item.as_submenu().cloned())
+    {
+        let check = MenuItem::with_id(
+            app,
+            CHECK_UPDATES_EVENT,
+            "Check for Updates…",
+            true,
+            None::<&str>,
+        )?;
+        app_submenu.insert(&check, 1)?;
+    }
+    Ok(menu)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let core = Service::new(Config::from_env()).expect("failed to initialise GitHub client");
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    // Only macOS has an app menu bar; elsewhere a menu would add a bar to the window.
+    #[cfg(target_os = "macos")]
+    let builder = builder.menu(app_menu);
+    builder
+        .on_menu_event(|app, event| {
+            if event.id() == CHECK_UPDATES_EVENT {
+                let _ = app.emit(CHECK_UPDATES_EVENT, ());
+            }
+        })
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())

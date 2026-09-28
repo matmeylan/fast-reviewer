@@ -144,7 +144,7 @@ function Shell(props: { store: AppStore }) {
             )}
           </Show>
         </Show>
-        <UpdateButton onError={s.toast} />
+        <UpdateButton onError={s.toast} onInfo={(m) => s.toast(m, "info")} />
       </div>
       <Switch>
         <Match when={s.phase() === "loading"}>

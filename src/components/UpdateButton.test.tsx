@@ -98,4 +98,53 @@ describe("UpdateButton", () => {
     await vi.advanceTimersByTimeAsync(CHECK_INTERVAL_MS);
     expect(updater.checks).toBe(2);
   });
+
+  it("checks on demand from the app menu and always reports the outcome", async () => {
+    let request!: () => void;
+    let unsubscribed = false;
+    let latest: AvailableUpdate | null = null;
+    let fail = false;
+    const updater: Updater & { checks: number } = {
+      checks: 0,
+      check: async () => {
+        updater.checks++;
+        if (fail) throw new Error("offline");
+        return latest;
+      },
+      onCheckRequested(fn) {
+        request = fn;
+        return () => (unsubscribed = true);
+      },
+    };
+    const onInfo = vi.fn();
+    const onError = vi.fn();
+    const { queryByTestId, unmount } = render(() => (
+      <UpdateButton updater={updater} onError={onError} onInfo={onInfo} />
+    ));
+    await waitFor(() => expect(updater.checks).toBe(1));
+    // The startup check says nothing when up to date; a requested one does.
+    expect(onInfo).not.toHaveBeenCalled();
+    request();
+    await waitFor(() => expect(onInfo).toHaveBeenCalledWith("Fast Reviewer is up to date."));
+
+    fail = true;
+    request();
+    await waitFor(() => expect(onError).toHaveBeenCalledWith("Couldn't check for updates: offline"));
+
+    fail = false;
+    latest = { version: "0.1.45", install: async () => {} };
+    request();
+    await waitFor(() => expect(queryByTestId("update-button")?.textContent).toBe("Update to 0.1.45"));
+    expect(onInfo).toHaveBeenLastCalledWith(
+      "Fast Reviewer 0.1.45 is available. Click “Update to 0.1.45” to install it.",
+    );
+    // Already known: no new request to GitHub, same answer.
+    const checks = updater.checks;
+    request();
+    expect(updater.checks).toBe(checks);
+    expect(onInfo).toHaveBeenCalledTimes(3);
+
+    unmount();
+    expect(unsubscribed).toBe(true);
+  });
 });
