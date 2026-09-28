@@ -52,7 +52,9 @@ For GitHub Enterprise, set `GITHUB_API_URL` (for example `https://ghe.example.co
 Every push runs `.github/workflows/ci.yml`: lint and all tests on Linux, plus a universal macOS build (Apple Silicon + Intel).
 
 - **Latest build:** open the repo's *Actions* tab → the latest *CI* run → download the `fast-reviewer-macos` artifact (`.dmg` and a zipped `.app`).
-- **Releases:** every push to `main` publishes a GitHub Release (`v<version>-build.<run>`, marked *Latest*) with the notarized `.dmg`; pushing a tag like `v0.2.0` publishes one under that name. Releases are only created when the build was signed and notarized.
+- **Releases:** every push to `main` publishes a GitHub Release (`v<major>.<minor>.<run>`, marked *Latest*) with the notarized `.dmg`; pushing a tag like `v0.2.0` publishes one under that name. Releases are only created when the build was signed and notarized.
+
+CI stamps each build with its own version: `<major>.<minor>` from `src-tauri/tauri.conf.json` plus the CI run number (for example `0.1.57`), or the tag's version for a `v*` tag. To start a new line, bump `version` in `tauri.conf.json` (say to `0.2.0`) before tagging. A tag must be higher than the builds already released, or installed apps won't be offered it.
 
 When the Apple signing secrets below are set, CI signs the app with your Developer ID and notarizes it with Apple, so it opens normally. Without them, the build is only ad-hoc signed and macOS refuses to open the downloaded app.
 
@@ -86,6 +88,28 @@ You need a paid Apple Developer Program membership.
 6. **Re-run CI** (Actions → CI → *Run workflow*, or push). The macOS job signs, notarizes and staples both the `.app` and the `.dmg`, then fails the build if Gatekeeper (`spctl`) would reject them.
 
 Delete `cert.p12` and the `.p8` from your disk once the secrets are saved.
+
+### In-app updates (one-time setup)
+
+The app checks `latest.json` in the latest GitHub release at startup and every 6 hours. When a newer version is out, an **Update to x.y.z** button shows in the title bar. One click downloads the update, checks its signature, replaces the app and restarts it.
+
+Updates are signed with a key of their own, separate from the Apple certificate:
+
+1. **Generate the key pair** (choose a password when asked):
+   ```sh
+   pnpm tauri signer generate -w ~/.tauri/fast-reviewer.key
+   ```
+2. **Commit the public key:** paste the contents of `~/.tauri/fast-reviewer.key.pub` into `plugins.updater.pubkey` in `src-tauri/tauri.conf.json`.
+3. **Add repository secrets:**
+
+   | Secret | Value |
+   |---|---|
+   | `TAURI_SIGNING_PRIVATE_KEY` | full contents of `~/.tauri/fast-reviewer.key` |
+   | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | the password from step 1 |
+
+Every release after that includes `Fast-Reviewer-macOS-universal.app.tar.gz`, its `.sig`, and `latest.json`. CI fails if the private key is set but the public key isn't committed.
+
+Keep a backup of the private key. Installed apps only accept updates signed with it, so losing it means everyone has to reinstall by hand. Apps from before this setup can't update themselves, so install the first release that has `latest.json` by hand. Development builds (`pnpm tauri dev`) never check for updates.
 
 ## Development
 

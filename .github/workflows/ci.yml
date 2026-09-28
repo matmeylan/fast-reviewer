@@ -97,6 +97,8 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
       - uses: actions/upload-artifact@v4
         with:
@@ -130,8 +132,26 @@ jobs:
             tag="$GITHUB_REF_NAME"
           else
             # Tags created with GITHUB_TOKEN don't trigger another CI run.
-            tag="v${VERSION}-build.${GITHUB_RUN_NUMBER}"
+            tag="v${VERSION}"
           fi
+
+          # The in-app updater reads latest.json from the latest release
+          # (plugins > updater > endpoints in tauri.conf.json).
+          tar=Fast-Reviewer-macOS-universal.app.tar.gz
+          if [ -f "out/$tar.sig" ]; then
+            jq -n \
+              --arg version "$VERSION" \
+              --arg date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+              --arg url "https://github.com/$GITHUB_REPOSITORY/releases/download/$tag/$tar" \
+              --arg sig "$(cat "out/$tar.sig")" \
+              '{version: $version, pub_date: $date, platforms: {
+                 "darwin-aarch64": {url: $url, signature: $sig},
+                 "darwin-x86_64": {url: $url, signature: $sig}}}' > out/latest.json
+            cat out/latest.json
+          else
+            echo "::warning::No signed updater archive: installed apps won't be offered this release."
+          fi
+
           gh release create "$tag" out/* \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
