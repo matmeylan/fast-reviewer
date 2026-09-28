@@ -1,5 +1,7 @@
 import { For } from "solid-js";
 import type { AppStore } from "../lib/store";
+import { DialogContent, DialogHeader, DialogOverlay, DialogTitle } from "./ui/dialog";
+import { Kbd, KbdGroup } from "./ui/kbd";
 
 const isMac = typeof navigator !== "undefined" && /Mac/.test(navigator.platform);
 
@@ -21,27 +23,24 @@ const SHORTCUTS: [string[], string][] = [
 
 export default function HelpOverlay(props: { store: AppStore }) {
   return (
-    <div
-      class="overlay"
-      onMouseDown={(e) => e.target === e.currentTarget && props.store.setOverlay("none")}
-    >
-      <div class="help" role="dialog" aria-label="Keyboard shortcuts" data-testid="help">
-        <h2>Keyboard shortcuts</h2>
-        <table>
-          <tbody>
-            <For each={SHORTCUTS}>
-              {([keys, label]) => (
-                <tr>
-                  <td>
-                    <For each={keys}>{(k) => <kbd>{k}</kbd>}</For>
-                  </td>
-                  <td>{label}</td>
-                </tr>
-              )}
-            </For>
-          </tbody>
-        </table>
-      </div>
-    </div>
+    <DialogOverlay onMouseDown={(e) => e.target === e.currentTarget && props.store.setOverlay("none")}>
+      <DialogContent class="w-[440px] gap-3 p-5" aria-label="Keyboard shortcuts" data-testid="help">
+        <DialogHeader>
+          <DialogTitle>Keyboard shortcuts</DialogTitle>
+        </DialogHeader>
+        <div class="flex flex-col">
+          <For each={SHORTCUTS}>
+            {([keys, label]) => (
+              <div class="flex items-center justify-between gap-4 border-b border-border/60 py-2 last:border-0">
+                <span class="text-muted-foreground">{label}</span>
+                <KbdGroup>
+                  <For each={keys}>{(k) => <Kbd>{k}</Kbd>}</For>
+                </KbdGroup>
+              </div>
+            )}
+          </For>
+        </div>
+      </DialogContent>
+    </DialogOverlay>
   );
 }

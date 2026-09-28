@@ -157,9 +157,21 @@ function DiffBody(props: DiffViewProps) {
     if (dc) setCodeWidth(dc.clientWidth);
   };
 
-  onMount(() => {
+  const measureChar = () => {
     const w = measure.getBoundingClientRect().width / 64;
     if (w > 0) setCharWidth(w);
+  };
+
+  onMount(() => {
+    measureChar();
+    // The code font is a web font: measure again once it has loaded.
+    let live = true;
+    onCleanup(() => (live = false));
+    document.fonts?.ready.then(() => {
+      if (!live) return;
+      measureChar();
+      measureCode();
+    });
     setViewHeight(scroller.clientHeight || viewHeight());
     if (typeof ResizeObserver !== "undefined") {
       const ro = new ResizeObserver(() => {
