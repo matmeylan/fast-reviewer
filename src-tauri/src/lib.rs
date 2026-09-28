@@ -11,6 +11,7 @@
 //!   set_file_viewed(prId: String, path: String, viewed: bool) -> ()
 //!   open_url(url: String) -> ()
 //! Errors are returned as `String` messages.
+//! Updates go through the updater and process plugins, called from src/lib/updater.ts.
 use std::sync::Arc;
 
 use fast_reviewer_core::model::{AuthStatus, FileDiff, PrDetail, PrSummary, RepoSummary};
@@ -92,6 +93,8 @@ pub fn run() {
     let core = Service::new(Config::from_env()).expect("failed to initialise GitHub client");
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .manage(core)
         .invoke_handler(tauri::generate_handler![
             auth_status,

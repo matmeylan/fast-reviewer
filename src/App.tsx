@@ -8,6 +8,7 @@ import MainPane from "./components/MainPane";
 import Picker from "./components/Picker";
 import Sidebar from "./components/Sidebar";
 import Toasts from "./components/Toasts";
+import UpdateButton from "./components/UpdateButton";
 import { Button } from "./components/ui/button";
 import { Kbd } from "./components/ui/kbd";
 import { Spinner } from "./components/ui/spinner";
@@ -138,6 +139,7 @@ function Shell(props: { store: AppStore }) {
             )}
           </Show>
         </Show>
+        <UpdateButton onError={s.toast} />
       </div>
       <Switch>
         <Match when={s.phase() === "loading"}>

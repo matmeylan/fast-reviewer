@@ -11,6 +11,8 @@
 #   APPLE_API_ISSUER, APPLE_API_KEY (key id), APPLE_API_KEY_P8 (contents of AuthKey_<id>.p8)
 # or an Apple ID:
 #   APPLE_ID, APPLE_PASSWORD (app-specific password), APPLE_TEAM_ID
+# In-app updates (see README > In-app updates):
+#   TAURI_SIGNING_PRIVATE_KEY, TAURI_SIGNING_PRIVATE_KEY_PASSWORD
 set -euo pipefail
 
 TARGET=universal-apple-darwin
@@ -21,9 +23,40 @@ OUT="${OUT_DIR:-out}"
 # GitHub passes unset secrets as empty strings; the Tauri bundler treats a
 # set-but-empty variable as configured, so drop the empty ones.
 for v in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY \
-         APPLE_API_ISSUER APPLE_API_KEY APPLE_API_KEY_P8 APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+         APPLE_API_ISSUER APPLE_API_KEY APPLE_API_KEY_P8 APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID \
+         TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD; do
   if [ -z "${!v:-}" ]; then unset "$v"; fi
 done
+
+# The updater only offers a release whose version is higher than the running
+# app's, so every CI build gets its own increasing version: a v* tag's version,
+# else <major>.<minor> from tauri.conf.json and the CI run number.
+conf() { node -p "require('./src-tauri/tauri.conf.json').$1"; }
+BASE_VERSION="$(conf version)"
+if [ "${GITHUB_REF_TYPE:-}" = tag ] && [[ "${GITHUB_REF_NAME:-}" == v* ]]; then
+  VERSION="${GITHUB_REF_NAME#v}"
+elif [ -n "${GITHUB_RUN_NUMBER:-}" ]; then
+  VERSION="${BASE_VERSION%.*}.$GITHUB_RUN_NUMBER"
+else
+  VERSION="$BASE_VERSION"
+fi
+if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+  echo "::error::'$VERSION' is not a semver version (tags must look like v1.2.3)"
+  exit 1
+fi
+echo "Version: $VERSION"
+
+# Updater artifacts: the .app as a .tar.gz, signed with the updater key.
+updater=0
+if [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
+  if [ -z "$(conf plugins.updater.pubkey)" ]; then
+    echo "::error::TAURI_SIGNING_PRIVATE_KEY is set but plugins.updater.pubkey in src-tauri/tauri.conf.json is empty. See README > In-app updates."
+    exit 1
+  fi
+  updater=1
+else
+  echo "::warning::No updater signing key: installed apps won't be offered this build. See README > In-app updates."
+fi
 
 signed=0
 notary=()
@@ -63,13 +96,16 @@ else
   echo "::warning::No Apple signing secrets: building ad-hoc signed. See README > Code signing."
 fi
 
-if [ "$signed" = 1 ]; then
-  # Tauri signs with the hardened runtime and, given API-key or Apple-ID env vars, notarizes and staples the .app.
-  pnpm tauri build --target "$TARGET" --bundles app,dmg
-else
-  pnpm tauri build --target "$TARGET" --bundles app,dmg \
-    --config '{"bundle":{"macOS":{"signingIdentity":"-"}}}'
-fi
+# Build-time overrides of tauri.conf.json.
+CONFIG="$(node -e '
+  const [version, signed, updater] = process.argv.slice(1);
+  const bundle = { createUpdaterArtifacts: updater === "1" };
+  if (signed !== "1") bundle.macOS = { signingIdentity: "-" };
+  console.log(JSON.stringify({ version, bundle }));
+' "$VERSION" "$signed" "$updater")"
+# When signed, Tauri signs with the hardened runtime and, given API-key or Apple-ID env
+# vars, notarizes and staples the .app before packing it for the updater.
+pnpm tauri build --target "$TARGET" --bundles app,dmg --config "$CONFIG"
 
 DMG="$(ls "$BUNDLE"/dmg/*.dmg)"
 if [ "$signed" = 1 ]; then
@@ -88,7 +124,7 @@ fi
 
 # Step outputs for the release job (only notarized builds are published).
 if [ -n "${GITHUB_OUTPUT:-}" ]; then
-  echo "version=$(node -p "require('./src-tauri/tauri.conf.json').version")" >> "$GITHUB_OUTPUT"
+  echo "version=$VERSION" >> "$GITHUB_OUTPUT"
   if [ "$signed" = 1 ] && [ ${#notary[@]} -gt 0 ]; then
     echo "notarized=true" >> "$GITHUB_OUTPUT"
   fi
@@ -98,4 +134,9 @@ mkdir -p "$OUT"
 cp "$DMG" "$OUT/"
 # Zip the .app too (ditto keeps symlinks, signature and stapled ticket).
 ditto -c -k --keepParent "$APP" "$OUT/Fast-Reviewer-macOS-universal.app.zip"
+if [ "$updater" = 1 ]; then
+  # What the in-app updater downloads; the release job lists it in latest.json.
+  cp "$APP.tar.gz" "$OUT/Fast-Reviewer-macOS-universal.app.tar.gz"
+  cp "$APP.tar.gz.sig" "$OUT/Fast-Reviewer-macOS-universal.app.tar.gz.sig"
+fi
 ls -la "$OUT"
