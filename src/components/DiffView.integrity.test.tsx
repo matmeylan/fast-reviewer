@@ -202,5 +202,6 @@ describe("DiffView integrity", () => {
       if (hunks.length === 0) continue;
       checkIntegrity(`random #${iter}`, fileDiff(`random-${iter}.ts`, oldText, newText, hunks));
     }
-  });
+    // ~2.5s locally, twice that on CI runners: above vitest's 5s default.
+  }, 30_000);
 });
