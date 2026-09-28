@@ -174,6 +174,147 @@ describe("DiffView", () => {
   });
 });
 
+describe("DiffView find", () => {
+  it("highlights matches, steps through them and scrolls the current one into view", () => {
+    const diff = bigDiff(3000);
+    const [nav, setNav] = createSignal<{ dir: 1 | -1; seq: number } | undefined>();
+    const [find, setFind] = createSignal<{ query: string; caseSensitive: boolean } | undefined>();
+    const statuses: { count: number; index: number }[] = [];
+    const { container } = render(() => (
+      <DiffView diff={diff} mode="split" find={find()} findNav={nav()} onFindStatus={(st) => statuses.push(st)} />
+    ));
+    const scroller = container.querySelector<HTMLElement>(".dv-scroll")!;
+    const status = () => statuses[statuses.length - 1];
+
+    // Only the changed lines say "computeFast": lines 3, 6, ... (new side only).
+    setFind({ query: "computefast", caseSensitive: false });
+    expect(status()).toEqual({ count: 1000, index: 0 });
+    expect(container.querySelectorAll(".fm").length).toBeGreaterThan(5);
+    expect(container.querySelectorAll(".fc").length).toBe(1);
+    expect(container.querySelector(".fc")!.textContent).toBe("computeFast");
+    expect(container.querySelector(".fc")!.closest(".dc")!.getAttribute("data-side")).toBe("new");
+
+    // Previous from the first wraps to the last match, deep in the file.
+    setNav({ dir: -1, seq: 1 });
+    expect(status()).toEqual({ count: 1000, index: 999 });
+    expect(scroller.scrollTop).toBeGreaterThan(2900 * ROW_HEIGHT);
+    expect(container.querySelector(".fc")!.closest(".dr")!.querySelector(".ln")!.textContent).toBe("3000");
+
+    setNav({ dir: 1, seq: 2 });
+    expect(status()).toEqual({ count: 1000, index: 0 });
+
+    // Case-sensitive: no match. Closing the bar clears the highlights.
+    setFind({ query: "computefast", caseSensitive: true });
+    expect(status()).toEqual({ count: 0, index: -1 });
+    setFind({ query: "compute", caseSensitive: false });
+    expect(status().count).toBe(3000 + 1000);
+    setFind(undefined);
+    expect(status()).toEqual({ count: 0, index: -1 });
+    expect(container.querySelector(".fm")).toBeNull();
+  });
+
+  it("keeps the current match across a mode switch and starts unpositioned on a new file", () => {
+    const [mode, setMode] = createSignal<"split" | "unified">("split");
+    const [diff, setDiff] = createSignal(bigDiff(300));
+    const [nav, setNav] = createSignal<{ dir: 1 | -1; seq: number } | undefined>();
+    let st = { count: 0, index: -1 };
+    const { container } = render(() => (
+      <DiffView
+        diff={diff()}
+        mode={mode()}
+        find={{ query: "value12", caseSensitive: false }}
+        findNav={nav()}
+        onFindStatus={(x) => (st = x)}
+      />
+    ));
+    // A file shown with the bar open starts unpositioned; the first step goes to the first match.
+    expect(st).toEqual({ count: 16, index: -1 });
+    setNav({ dir: 1, seq: 1 });
+    expect(st.index).toBe(0);
+    setNav({ dir: 1, seq: 2 });
+    setNav({ dir: 1, seq: 3 });
+    // The third match: line 120's deleted side.
+    const current = () => {
+      const dc = container.querySelector(".fc")!.closest(".dc")!;
+      return [dc.classList.contains("del"), dc.querySelector(".dt")!.textContent];
+    };
+    const before = current();
+    expect(before[0]).toBe(true);
+    expect(before[1]).toContain("value120 ");
+    setMode("unified");
+    expect(st.index).toBe(2);
+    expect(current()).toEqual(before);
+    setDiff(bigDiff(301));
+    expect(st.index).toBe(-1);
+    expect(container.querySelector(".fc")).toBeNull();
+    expect(container.querySelectorAll(".fm").length).toBeGreaterThan(0);
+  });
+});
+
+describe("DiffView selection", () => {
+  const select = (from: Node, fromOffset: number, to: Node, toOffset: number) => {
+    const sel = document.getSelection()!;
+    sel.removeAllRanges();
+    const r = document.createRange();
+    r.setStart(from, fromOffset);
+    r.setEnd(to, toOffset);
+    sel.addRange(r);
+    document.dispatchEvent(new Event("selectionchange"));
+  };
+  const copy = () => {
+    let text = null as string | null;
+    const e = new Event("copy", { bubbles: true, cancelable: true });
+    Object.defineProperty(e, "clipboardData", { value: { setData: (_t: string, v: string) => (text = v) } });
+    document.dispatchEvent(e);
+    return { text, prevented: e.defaultPrevented };
+  };
+
+  it("copies only the code of the side the selection started on", () => {
+    const diff = bigDiff(30);
+    const { container } = render(() => <DiffView diff={diff} mode="split" />);
+    const cells = (side: string) => [...container.querySelectorAll(`.dc[data-side="${side}"] .dt`)];
+    const newCells = cells("new");
+    // Rows 1..3 of the file; line 3 changed. Start 8 chars into line 1, end 5 chars into line 3.
+    newCells[2].dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    expect(container.querySelector(".diff-view")!.getAttribute("data-sel")).toBe("new");
+    const first = newCells[0].firstChild!;
+    const last = newCells[2];
+    select(first, 8, last, 0);
+    const r = document.getSelection()!.getRangeAt(0);
+    r.setEnd(last.firstChild!.nodeType === Node.TEXT_NODE ? last.firstChild! : last.firstChild!.firstChild!, 5);
+    const { text, prevented } = copy();
+    expect(prevented).toBe(true);
+    const lines = text!.split("\n");
+    expect(lines).toHaveLength(3);
+    expect(lines[0]).toBe(diff.hunks[0].lines[0].text.slice(8));
+    expect(lines[1]).toBe(diff.hunks[0].lines[1].text);
+    expect(lines[2]).toBe("  con");
+  });
+
+  it("leaves copies outside the diff alone", () => {
+    render(() => <DiffView diff={bigDiff(30)} mode="unified" />);
+    const outside = document.body.appendChild(document.createElement("p"));
+    outside.textContent = "elsewhere";
+    select(outside.firstChild!, 0, outside.firstChild!, 4);
+    expect(copy()).toEqual({ text: null, prevented: false });
+    outside.remove();
+  });
+
+  it("keeps the selection's anchor row rendered while scrolled away", () => {
+    const { container } = render(() => <DiffView diff={bigDiff(3000)} mode="unified" />);
+    const scroller = container.querySelector<HTMLElement>(".dv-scroll")!;
+    const dt = container.querySelectorAll(".dt")[1];
+    select(dt.firstChild!, 0, dt.firstChild!, 3);
+    scroller.scrollTop = 2000 * ROW_HEIGHT;
+    scroller.dispatchEvent(new Event("scroll"));
+    expect(dt.isConnected).toBe(true);
+    // Collapsing the selection releases it.
+    document.getSelection()!.removeAllRanges();
+    document.dispatchEvent(new Event("selectionchange"));
+    expect(dt.isConnected).toBe(false);
+  });
+});
+
 describe("anchorRow", () => {
   const ctx = (no: number): DiffLine => ({ kind: "context", oldNo: no, newNo: no, text: "", segments: null });
   const del = (no: number): DiffLine => ({ kind: "del", oldNo: no, newNo: null, text: "", segments: null });

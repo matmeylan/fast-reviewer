@@ -41,6 +41,8 @@ A native desktop app (macOS first, Linux later) for reviewing GitHub pull reques
 | `v` | Toggle split / unified view |
 | `n` / `p` | Next / previous hunk |
 | `⌘K` / `Ctrl+K` | Open PR picker |
+| `⌘F` / `Ctrl+F` | Find in file |
+| `⌘G` / `⇧⌘G` | Next / previous find match |
 | `o` | Open the PR in the browser |
 | `?` | Shortcut help |
 
@@ -48,6 +50,8 @@ A native desktop app (macOS first, Linux later) for reviewing GitHub pull reques
 
 - Left: file tree. Folders sorted alphabetically before files, both alphabetical; single-child folder chains are compacted (`src/lib/utils`). Each file shows its IntelliJ file-type icon, its name colored by change status, `+N −M` and a viewed check mark; folders show how many files are left to review. A flat list (file name plus folder path, same order) is one click away. Header shows progress (viewed/total).
 - Right: selected file diff, split (side by side) or unified. Added/removed lines are tinted; the exact changed characters within a modified line get a stronger highlight.
+- Find in file: rows are virtualized, so the browser's own find cannot see off-screen lines. `src/components/diff-find.ts` matches the query against the row model; `DiffView` renders the matches into the line HTML and scrolls the current one into view; `FindBar` edits the query, which lives in the store and persists across files.
+- Selection: the shell disables text selection; code cells re-enable it. While a selection lives, its anchor row stays rendered even when scrolled out of the virtualized window. In split view the side the drag started on is the only selectable one, and a `copy` handler writes just the selected code, one line per row.
 
 ## Testing
 

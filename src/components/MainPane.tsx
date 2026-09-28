@@ -2,6 +2,7 @@ import { Match, Show, Switch } from "solid-js";
 import logoUrl from "../../assets/logo.svg";
 import type { AppStore } from "../lib/store";
 import DiffView from "./DiffView";
+import FindBar from "./FindBar";
 import { Counts } from "./FileTree";
 import CircleCheckBig from "lucide-solid/icons/circle-check-big";
 import Columns2 from "lucide-solid/icons/columns-2";
@@ -155,6 +156,9 @@ export default function MainPane(props: { store: AppStore }) {
                 mode={s.mode()}
                 hunkNav={s.hunkNav()}
                 stats={d().tooLarge ? statsFor(d().path) : undefined}
+                find={s.findOpen() ? { query: s.findQuery(), caseSensitive: s.findCase() } : undefined}
+                findNav={s.findNav()}
+                onFindStatus={s.setFindStatus}
               />
             )}
           </Match>
@@ -167,6 +171,9 @@ export default function MainPane(props: { store: AppStore }) {
             </Empty>
           </Match>
         </Switch>
+        <Show when={s.findOpen() && s.pr()}>
+          <FindBar store={s} />
+        </Show>
       </div>
     </main>
   );

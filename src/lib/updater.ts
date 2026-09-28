@@ -13,7 +13,12 @@ export interface AvailableUpdate {
 export interface Updater {
   /** The newer version the latest release offers, or null when up to date. */
   check(): Promise<AvailableUpdate | null>;
+  /** Calls `fn` when the user picks "Check for Updates…" in the app menu. Returns an unsubscribe. */
+  onCheckRequested?(fn: () => void): () => void;
 }
+
+/** Emitted by the app menu item (see src-tauri/src/lib.rs). */
+const CHECK_UPDATES_EVENT = "check-for-updates";
 
 function tauriUpdater(): Updater {
   return {
@@ -38,6 +43,20 @@ function tauriUpdater(): Updater {
           const { relaunch } = await import("@tauri-apps/plugin-process");
           await relaunch();
         },
+      };
+    },
+    onCheckRequested(fn) {
+      let stop: (() => void) | null = null;
+      let stopped = false;
+      import("@tauri-apps/api/event")
+        .then(({ listen }) => listen(CHECK_UPDATES_EVENT, () => fn()))
+        .then(
+          (unlisten) => (stopped ? unlisten() : (stop = unlisten)),
+          (e) => console.warn("Couldn't listen for update checks:", e),
+        );
+      return () => {
+        stopped = true;
+        stop?.();
       };
     },
   };

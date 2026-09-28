@@ -167,7 +167,8 @@ export function pairLines(lines: readonly DiffLine[], out: Row[] = []): Row[] {
   return out;
 }
 
-function cols(text: string): number {
+/** Display width in columns (tabs count as 4). */
+export function cols(text: string): number {
   let c = text.length;
   for (let i = text.indexOf("\t"); i !== -1; i = text.indexOf("\t", i + 1)) c += 3;
   return c;

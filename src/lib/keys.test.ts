@@ -11,6 +11,7 @@ const state = (over: Partial<NavState> & { viewed?: string[] } = {}): NavState =
     mode: "split",
     overlay: "none",
     done: false,
+    findOpen: false,
     ...over,
   };
 };
@@ -36,6 +37,15 @@ describe("keyToAction", () => {
     expect(keyToAction({ key: "r", metaKey: true }, false)).toBeNull();
     expect(keyToAction({ key: "r", altKey: true }, false)).toBeNull();
     expect(keyToAction({ key: "Escape" }, true)).toBe("escape");
+  });
+
+  it("finds with Cmd/Ctrl+F and steps with (Shift+)Cmd/Ctrl+G, even while typing", () => {
+    expect(keyToAction({ key: "f", metaKey: true }, true)).toBe("find");
+    expect(keyToAction({ key: "f", ctrlKey: true }, false)).toBe("find");
+    expect(keyToAction({ key: "g", metaKey: true }, true)).toBe("findNext");
+    expect(keyToAction({ key: "G", metaKey: true, shiftKey: true }, true)).toBe("findPrev");
+    expect(keyToAction({ key: "f" }, false)).toBeNull();
+    expect(keyToAction({ key: "f", metaKey: true, altKey: true }, false)).toBeNull();
   });
 
   it("detects typing targets", () => {
@@ -136,6 +146,29 @@ describe("reduce", () => {
   });
 });
 
+describe("reduce: find", () => {
+  it("Cmd+F opens the find bar and focuses it", () => {
+    expect(reduce(state(), "find")).toEqual({ findOpen: true, effects: [{ type: "focusFind" }] });
+    expect(reduce(state({ findOpen: true }), "find")).toEqual({ findOpen: true, effects: [{ type: "focusFind" }] });
+  });
+
+  it("Cmd+G steps through matches, or opens the bar first", () => {
+    expect(reduce(state({ findOpen: true }), "findNext").effects).toEqual([{ type: "findNav", dir: 1 }]);
+    expect(reduce(state({ findOpen: true }), "findPrev").effects).toEqual([{ type: "findNav", dir: -1 }]);
+    expect(reduce(state(), "findNext")).toEqual({ findOpen: true, effects: [{ type: "focusFind" }] });
+  });
+
+  it("escape closes an overlay first, then the find bar", () => {
+    expect(reduce(state({ findOpen: true, overlay: "help" }), "escape")).toEqual({ overlay: "none", effects: [] });
+    expect(reduce(state({ findOpen: true }), "escape")).toEqual({ findOpen: false, effects: [] });
+    expect(reduce(state(), "escape")).toEqual({ effects: [] });
+  });
+
+  it("does nothing under an overlay", () => {
+    expect(reduce(state({ overlay: "picker" }), "find")).toEqual({ effects: [] });
+  });
+});
+
 describe("upcomingUnviewed", () => {
   const files = ["a", "b", "c", "d", "e", "f"];
   it("lists the next unviewed files in order, the same ones repeated r visits", () => {
@@ -147,7 +180,7 @@ describe("upcomingUnviewed", () => {
     const seen = new Set(viewed);
     for (const want of upcomingUnviewed(files, "b", isViewed, 3)) {
       seen.add(cur);
-      const u = reduce({ order: files, current: cur, isViewed: (p) => seen.has(p), mode: "split", overlay: "none", done: false }, "review");
+      const u = reduce({ order: files, current: cur, isViewed: (p) => seen.has(p), mode: "split", overlay: "none", done: false, findOpen: false }, "review");
       expect(u.current).toBe(want);
       cur = u.current!;
     }
