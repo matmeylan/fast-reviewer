@@ -49,7 +49,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDE2N0M4MEUwNTBDQkU0MkEKUldRcTVNdFE0SUI4RnVmQ3FOeGhVNlNVUFJ2R0FrS1ZuSW5jaHFZWjd0RTNiVnl5Vzd6U1RtbkEK",
       "endpoints": [
         "https://github.com/matmeylan/fast-reviewer/releases/latest/download/latest.json"
       ]
