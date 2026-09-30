@@ -32,6 +32,8 @@ export interface PrSummary {
 
 export type FileStatus = "added" | "removed" | "modified" | "renamed" | "copied" | "changed";
 export type ViewedState = "VIEWED" | "UNVIEWED" | "DISMISSED";
+/** A version of a changed file: the merge base ("old", at `previousPath` for renames) or the PR head ("new"). */
+export type Side = "old" | "new";
 
 export interface ChangedFile {
   path: string;

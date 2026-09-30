@@ -60,6 +60,15 @@ pub enum FileStatus {
     Changed,
 }
 
+/// A version of a changed file: the merge base (`Old`, at the previous path for renames)
+/// or the PR head (`New`), the two sides of its diff.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Side {
+    Old,
+    New,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ViewedState {

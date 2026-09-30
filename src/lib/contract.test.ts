@@ -14,6 +14,7 @@ import type {
   PrDetail,
   PrSummary,
   RepoSummary,
+  Side,
   ViewedState,
 } from "./types";
 
@@ -50,6 +51,7 @@ const enums = {
   fileStatus: all<FileStatus>()(["added", "removed", "modified", "renamed", "copied", "changed"] as const),
   viewedState: all<ViewedState>()(["VIEWED", "UNVIEWED", "DISMISSED"] as const),
   lineKind: all<LineKind>()(["context", "add", "del"] as const),
+  side: all<Side>()(["old", "new"] as const),
 };
 
 const sorted = (o: object) => Object.keys(o).sort();

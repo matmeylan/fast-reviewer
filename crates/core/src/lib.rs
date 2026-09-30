@@ -6,6 +6,7 @@ pub mod error;
 pub mod github;
 pub mod model;
 pub mod service;
+pub mod temp_copy;
 
 pub use error::{Error, Result};
 pub use service::{Config, Service};

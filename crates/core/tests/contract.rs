@@ -134,6 +134,7 @@ fn enums_serialize_like_fixture() {
     use FileStatus as F;
     use InboxReason as I;
     use LineKind as L;
+    use Side as S;
     use ViewedState as V;
     assert_eq!(to_json(&[A::Env, A::GhCli, A::Keychain]), e["authSource"]);
     assert_eq!(
@@ -156,5 +157,6 @@ fn enums_serialize_like_fixture() {
         e["viewedState"]
     );
     assert_eq!(to_json(&[L::Context, L::Add, L::Del]), e["lineKind"]);
+    assert_eq!(to_json(&[S::Old, S::New]), e["side"]);
     assert_eq!(to_json(&()), json!(null), "set_file_viewed returns null");
 }

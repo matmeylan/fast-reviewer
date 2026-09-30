@@ -1,6 +1,6 @@
 //! High-level API used by the Tauri commands: auth state, PR metadata, cached diffs.
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -15,11 +15,15 @@ use crate::error::{Error, Result};
 use crate::github::{Content, GitHub, DEFAULT_API_URL};
 use crate::model::{
     AuthSource, AuthStatus, FileDiff, FileStatus, InboxReason, PrDetail, PrSummary, RepoSummary,
+    Side,
 };
+use crate::temp_copy;
 
 /// Files above either limit are not diffed (`tooLarge`).
 pub const MAX_DIFF_BYTES: usize = 1_500_000;
 pub const MAX_DIFF_LINES: usize = 20_000;
+/// Largest file `get_file_content` returns (images, files opened in their default app).
+pub const MAX_CONTENT_BYTES: usize = 50_000_000;
 const DIFF_CACHE_ENTRIES: usize = 200;
 const CONTEXT_LINES: usize = 3;
 const USER_REPOS_TTL: Duration = Duration::from_secs(300);
@@ -89,6 +93,15 @@ struct PrInfo {
 }
 
 type DiffFuture = Shared<BoxFuture<'static, Result<Arc<FileDiff>>>>;
+
+/// One side of a changed file, from `get_file_content`.
+pub struct FileContent {
+    /// Commit it was read at: the merge base (old side) or the head (new side).
+    pub sha: String,
+    /// Path at that commit: the previous path on the old side of a rename.
+    pub path: String,
+    pub bytes: Vec<u8>,
+}
 
 pub struct Service {
     gh: GitHub,
@@ -605,23 +618,123 @@ impl Service {
         Ok(out)
     }
 
-    /// File contents at a commit, via the disk cache. Files over `MAX_DIFF_BYTES` are not
-    /// downloaded in full and not cached (they are never diffed).
+    /// File contents at a commit for diffing: files over `MAX_DIFF_BYTES` are not downloaded
+    /// in full (they are never diffed).
     async fn content(&self, owner: &str, repo: &str, sha: &str, path: &str) -> Result<Content> {
+        self.content_up_to(owner, repo, sha, path, MAX_DIFF_BYTES)
+            .await
+    }
+
+    /// File contents at a commit, via the disk cache. Files over `limit` are not downloaded in
+    /// full. Only files up to `MAX_DIFF_BYTES` are cached: the cache is never pruned, and larger
+    /// files are only fetched when the user asks for them.
+    async fn content_up_to(
+        &self,
+        owner: &str,
+        repo: &str,
+        sha: &str,
+        path: &str,
+        limit: usize,
+    ) -> Result<Content> {
         let repo_key = format!("{owner}/{repo}");
         if let Some(hit) = self.blobs.get(&repo_key, sha, path).await {
             return Ok(hit.map_or(Content::Missing, Content::Bytes));
         }
-        let content = self
-            .gh
-            .file_content(owner, repo, sha, path, MAX_DIFF_BYTES)
-            .await?;
+        let content = self.gh.file_content(owner, repo, sha, path, limit).await?;
         match &content {
             Content::Missing => self.blobs.put(&repo_key, sha, path, None).await,
-            Content::Bytes(b) => self.blobs.put(&repo_key, sha, path, Some(b)).await,
-            Content::TooLarge(_) => {}
+            Content::Bytes(b) if b.len() <= MAX_DIFF_BYTES => {
+                self.blobs.put(&repo_key, sha, path, Some(b)).await
+            }
+            Content::Bytes(_) | Content::TooLarge(_) => {}
         }
         Ok(content)
+    }
+
+    /// Raw bytes of one side of a changed file, up to `MAX_CONTENT_BYTES`: the head version
+    /// (`Side::New`) or the merge-base version at the old path (`Side::Old`), the same two
+    /// versions `get_file_diff` compares. Used for images and files opened in another app.
+    pub async fn get_file_content(
+        self: &Arc<Self>,
+        owner: &str,
+        repo: &str,
+        number: u64,
+        path: &str,
+        side: Side,
+    ) -> Result<FileContent> {
+        let gen = self.ensure_auth().await?.generation;
+        let res = self.read_side(owner, repo, number, path, side).await;
+        self.on_err(gen, res).await
+    }
+
+    async fn read_side(
+        self: &Arc<Self>,
+        owner: &str,
+        repo: &str,
+        number: u64,
+        path: &str,
+        side: Side,
+    ) -> Result<FileContent> {
+        let info = self.pr_info(owner, repo, number).await?;
+        let (old_path, status) = info
+            .files
+            .get(path)
+            .cloned()
+            .unwrap_or((None, FileStatus::Modified));
+        // Like `compute_diff`, don't ask GitHub for a side the file doesn't have.
+        match (side, status) {
+            (Side::Old, FileStatus::Added) => {
+                return Err(Error::NotFound(format!("old version of {path}")))
+            }
+            (Side::New, FileStatus::Removed) => {
+                return Err(Error::NotFound(format!("new version of {path}")))
+            }
+            _ => {}
+        }
+        let (sha, at) = match side {
+            Side::New => (info.head_sha.clone(), path.to_owned()),
+            Side::Old => (
+                self.merge_base(owner, repo, &info).await?,
+                old_path.unwrap_or_else(|| path.to_owned()),
+            ),
+        };
+        match self
+            .content_up_to(owner, repo, &sha, &at, MAX_CONTENT_BYTES)
+            .await?
+        {
+            Content::Bytes(bytes) => Ok(FileContent {
+                sha,
+                path: at,
+                bytes,
+            }),
+            Content::Missing => Err(Error::NotFound(format!(
+                "{at} at {}",
+                sha.get(..7).unwrap_or(&sha)
+            ))),
+            Content::TooLarge(_) => Err(Error::Other(format!(
+                "{at} is larger than {} MB",
+                MAX_CONTENT_BYTES / 1_000_000
+            ))),
+        }
+    }
+
+    /// Write one side of a changed file under `root` (see `temp_copy::path_for`) so it can be
+    /// opened in its default app, and return where it went.
+    pub async fn save_temp_copy(
+        self: &Arc<Self>,
+        root: &Path,
+        owner: &str,
+        repo: &str,
+        number: u64,
+        path: &str,
+        side: Side,
+    ) -> Result<PathBuf> {
+        let file = self
+            .get_file_content(owner, repo, number, path, side)
+            .await?;
+        let target = temp_copy::path_for(root, owner, repo, number, side, &file.sha, &file.path)?;
+        temp_copy::write(&target, &file.bytes).await?;
+        Ok(target)
     }
 
     pub async fn set_file_viewed(&self, pr_id: &str, path: &str, viewed: bool) -> Result<()> {

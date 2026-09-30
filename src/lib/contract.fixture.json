@@ -70,6 +70,7 @@
     "inboxReason": ["reviewRequested", "authored", "other"],
     "fileStatus": ["added", "removed", "modified", "renamed", "copied", "changed"],
     "viewedState": ["VIEWED", "UNVIEWED", "DISMISSED"],
-    "lineKind": ["context", "add", "del"]
+    "lineKind": ["context", "add", "del"],
+    "side": ["old", "new"]
   }
 }

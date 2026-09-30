@@ -8,6 +8,8 @@
 //!   list_repo_prs(owner: String, repo: String) -> Vec<PrSummary>
 //!   get_pr(owner: String, repo: String, number: u64) -> PrDetail
 //!   get_file_diff(owner: String, repo: String, number: u64, path: String) -> FileDiff
+//!   get_file_content(owner: String, repo: String, number: u64, path: String, side: Side) -> raw bytes
+//!   open_file(owner: String, repo: String, number: u64, path: String, side: Side) -> ()
 //!   set_file_viewed(prId: String, path: String, viewed: bool) -> ()
 //!   open_url(url: String) -> ()
 //! Errors are returned as `String` messages.
@@ -15,8 +17,9 @@
 //! The app menu's "Check for Updates…" item emits `CHECK_UPDATES_EVENT` to the UI.
 use std::sync::Arc;
 
-use fast_reviewer_core::model::{AuthStatus, FileDiff, PrDetail, PrSummary, RepoSummary};
+use fast_reviewer_core::model::{AuthStatus, FileDiff, PrDetail, PrSummary, RepoSummary, Side};
 use fast_reviewer_core::{Config, Service};
+use tauri::ipc::Response;
 use tauri::menu::{Menu, MenuItem};
 use tauri::{AppHandle, Emitter, Runtime, State};
 use tauri_plugin_opener::OpenerExt;
@@ -71,6 +74,43 @@ async fn get_file_diff(
     path: String,
 ) -> CmdResult<Arc<FileDiff>> {
     Ok(core.get_file_diff(&owner, &repo, number, &path).await?)
+}
+
+/// Raw bytes, so the UI gets an `ArrayBuffer` rather than a JSON array of numbers.
+#[tauri::command]
+async fn get_file_content(
+    core: Core<'_>,
+    owner: String,
+    repo: String,
+    number: u64,
+    path: String,
+    side: Side,
+) -> CmdResult<Response> {
+    let file = core
+        .get_file_content(&owner, &repo, number, &path, side)
+        .await?;
+    Ok(Response::new(file.bytes))
+}
+
+/// Writes one side of the file to the temp dir and opens it with the OS default app. The
+/// opener is called from Rust, so it needs no JS capability (and none is granted).
+#[tauri::command]
+async fn open_file(
+    app: tauri::AppHandle,
+    core: Core<'_>,
+    owner: String,
+    repo: String,
+    number: u64,
+    path: String,
+    side: Side,
+) -> CmdResult<()> {
+    let root = std::env::temp_dir().join("fast-reviewer");
+    let file = core
+        .save_temp_copy(&root, &owner, &repo, number, &path, side)
+        .await?;
+    app.opener()
+        .open_path(file.to_string_lossy(), None::<&str>)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -141,6 +181,8 @@ pub fn run() {
             list_repo_prs,
             get_pr,
             get_file_diff,
+            get_file_content,
+            open_file,
             set_file_viewed,
             open_url,
         ])
