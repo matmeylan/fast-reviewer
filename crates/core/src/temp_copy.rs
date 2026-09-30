@@ -7,6 +7,64 @@ use crate::model::Side;
 /// Characters of the commit SHA in the directory name.
 const SHORT_SHA: usize = 12;
 
+/// Extensions the OS may run rather than view: scripts, installers, launchers and link files.
+/// A PR can add any file, so these are never handed to the default app.
+const RUNNABLE: &[&str] = &[
+    "app",
+    "applescript",
+    "bash",
+    "bat",
+    "cmd",
+    "com",
+    "command",
+    "cpl",
+    "csh",
+    "deb",
+    "desktop",
+    "dmg",
+    "exe",
+    "fileloc",
+    "fish",
+    "hta",
+    "inetloc",
+    "jar",
+    "js",
+    "jse",
+    "ksh",
+    "lnk",
+    "mpkg",
+    "msi",
+    "pif",
+    "pkg",
+    "ps1",
+    "rpm",
+    "scpt",
+    "scr",
+    "sh",
+    "terminal",
+    "tool",
+    "url",
+    "vbe",
+    "vbs",
+    "webloc",
+    "workflow",
+    "ws",
+    "wsf",
+    "zsh",
+];
+
+/// Refuse file types the OS might execute instead of opening in a viewer.
+pub fn check_openable(path: &str) -> Result<()> {
+    let name = path.rsplit(['/', '\\']).next().unwrap_or(path);
+    let ext = name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase());
+    match ext {
+        Some(ext) if RUNNABLE.contains(&ext.as_str()) => Err(Error::Other(format!(
+            "{name} could run code, so it isn't opened outside the app. View it on GitHub instead."
+        ))),
+        _ => Ok(()),
+    }
+}
+
 /// `<root>/<owner>/<repo>/<number>/<side>-<short sha>/<file name>`. The file keeps its name and
 /// extension so the OS picks the right app; the side and commit keep the old and new versions
 /// (and versions from earlier pushes) apart. Only the base name of `path` is used, and every
@@ -150,6 +208,28 @@ mod tests {
                 p(owner, repo, Side::New, SHA, "a.pdf").is_err(),
                 "{owner}/{repo}"
             );
+        }
+    }
+
+    #[test]
+    fn refuses_runnable_files() {
+        for path in [
+            "x/run.command",
+            "Setup.EXE",
+            "a/b/launch.terminal",
+            "tool.jar",
+            "go.sh",
+        ] {
+            assert!(check_openable(path).is_err(), "{path}");
+        }
+        for path in [
+            "docs/guide.pdf",
+            "fonts/Inter.woff2",
+            "Makefile",
+            "archive.zip",
+            "sh/notes.pdf",
+        ] {
+            assert!(check_openable(path).is_ok(), "{path}");
         }
     }
 

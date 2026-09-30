@@ -729,6 +729,7 @@ impl Service {
         path: &str,
         side: Side,
     ) -> Result<PathBuf> {
+        temp_copy::check_openable(path)?;
         let file = self
             .get_file_content(owner, repo, number, path, side)
             .await?;
