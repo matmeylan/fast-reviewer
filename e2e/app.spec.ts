@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 
 const ORDER = [
   "api/routes/orders.py",
@@ -7,6 +7,7 @@ const ORDER = [
   "api/legacy_auth.py",
   "api/models.py",
   "api/server.py",
+  "docs/guide.pdf",
   "docs/step2-setup.md",
   "docs/step10-deploy.md",
   "packages/shared/src/index.ts",
@@ -24,6 +25,7 @@ const ORDER = [
   "src/lib/api.ts",
   "src/lib/format.ts",
   "tests/test_orders.py",
+  "web/assets/icon.svg",
   "web/assets/logo.png",
   "web/index.html",
   "web/styles.css",
@@ -63,7 +65,7 @@ test("opens a PR and renders the tree in visual order", async ({ page }) => {
   expect(paths).toEqual(ORDER);
   await expect(page.locator(".row.dir").first()).toHaveText(/^api\d+ left$/);
   await expect(page.locator('.row.dir[data-path="packages/shared/src"]')).toContainText("packages/shared/src");
-  await expect(page.getByTestId("progress")).toContainText("2/28 viewed");
+  await expect(page.getByTestId("progress")).toContainText("2/30 viewed");
   await expect(file(page, "src/components/Table/Table.tsx")).toHaveAttribute("data-status", "renamed");
   await expect(file(page, "api/legacy_auth.py")).toHaveAttribute("data-status", "removed");
   // First unviewed file is selected and its diff shown.
@@ -77,7 +79,7 @@ test("r marks viewed and advances; s skips; j/k navigate", async ({ page }) => {
   await page.keyboard.press("r");
   await expect(file(page, "api/routes/orders.py")).toHaveClass(/viewed/);
   expect(await selectedPath(page)).toBe("api/routes/users.py");
-  await expect(page.getByTestId("progress")).toContainText("3/28 viewed");
+  await expect(page.getByTestId("progress")).toContainText("3/30 viewed");
 
   await page.keyboard.press("s");
   expect(await selectedPath(page)).toBe("api/__init__.py");
@@ -101,14 +103,15 @@ test("r marks viewed and advances; s skips; j/k navigate", async ({ page }) => {
 test("reviewing the last unviewed file shows 'All files reviewed'", async ({ page }) => {
   await openMainPr(page);
   await page.getByTestId("file-filter").fill("web/");
-  await expect(page.getByTestId("tree-file")).toHaveCount(3);
+  await expect(page.getByTestId("tree-file")).toHaveCount(4);
   await page.keyboard.press("Enter");
-  expect(await selectedPath(page)).toBe("web/assets/logo.png");
+  expect(await selectedPath(page)).toBe("web/assets/icon.svg");
+  await page.keyboard.press("r");
   await page.keyboard.press("r");
   await page.keyboard.press("r");
   await page.keyboard.press("r");
   await expect(page.getByTestId("all-reviewed")).toBeVisible();
-  await expect(page.getByTestId("progress")).toContainText("5/28 viewed");
+  await expect(page.getByTestId("progress")).toContainText("6/30 viewed");
 });
 
 test("v toggles split/unified and persists", async ({ page }) => {
@@ -161,7 +164,7 @@ test("file filter with '/' shortcut", async ({ page }) => {
   await expect(page.getByTestId("tree-file")).toHaveCount(7);
   // Typing in the filter must not trigger shortcuts.
   await page.keyboard.type("r");
-  await expect(page.getByTestId("progress")).toContainText("2/28 viewed");
+  await expect(page.getByTestId("progress")).toContainText("2/30 viewed");
   await page.keyboard.press("Escape");
   await expect(page.getByTestId("tree-file")).toHaveCount(ORDER.length);
 });
@@ -210,7 +213,7 @@ test("failed viewed sync rolls back with a toast", async ({ page }) => {
   await page.keyboard.press("r");
   await expect(page.getByTestId("toast")).toContainText("Couldn't mark orders.py as viewed");
   await expect(file(page, "api/routes/orders.py")).not.toHaveClass(/viewed/);
-  await expect(page.getByTestId("progress")).toContainText("2/28 viewed");
+  await expect(page.getByTestId("progress")).toContainText("2/30 viewed");
 });
 
 test("help overlay", async ({ page }) => {
@@ -219,6 +222,75 @@ test("help overlay", async ({ page }) => {
   await expect(page.getByTestId("help")).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(page.getByTestId("help")).toBeHidden();
+});
+
+type MockReview = { number: number; event: string; body: string };
+const mockReviews = (page: Page) =>
+  page.evaluate(() => (window as unknown as { __mockReviews: MockReview[] }).__mockReviews);
+
+test("review dialog: Comment needs text; Approve submits to GitHub", async ({ page }) => {
+  await openMainPr(page);
+  await page.getByTestId("review-button").click();
+  const dialog = page.getByTestId("review-dialog");
+  await expect(dialog).toContainText("acme/web#482");
+  await expect(dialog.getByTestId("review-comment")).toBeDisabled();
+  await dialog.getByTestId("review-body").fill("Looks great, thanks!");
+  await expect(dialog.getByTestId("review-comment")).toBeEnabled();
+  await dialog.getByTestId("review-approve").click();
+  await expect(dialog.getByTestId("review-success")).toContainText("Approved");
+  await expect(dialog.getByTestId("review-open")).toBeVisible();
+  expect(await mockReviews(page)).toMatchObject([{ number: 482, event: "APPROVE", body: "Looks great, thanks!" }]);
+  await expect(page.getByTestId("toast")).toContainText("Approved");
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  // Shortcuts work again once the dialog is closed.
+  await page.keyboard.press("j");
+  expect(await selectedPath(page)).toBe("api/routes/users.py");
+});
+
+test("a opens the review dialog; Ctrl+Enter comments", async ({ page }) => {
+  await openMainPr(page);
+  await page.keyboard.press("a");
+  const dialog = page.getByTestId("review-dialog");
+  const body = dialog.getByTestId("review-body");
+  await expect(body).toBeFocused();
+  // The key that opened the dialog is not typed into it.
+  await expect(body).toHaveValue("");
+  await page.keyboard.type("nit: rename");
+  await page.keyboard.press("Control+Enter");
+  await expect(dialog.getByTestId("review-success")).toContainText("Review submitted");
+  expect(await mockReviews(page)).toMatchObject([{ number: 482, event: "COMMENT", body: "nit: rename" }]);
+  await dialog.getByTestId("review-again").click();
+  await expect(dialog.getByTestId("review-body")).toHaveValue("");
+});
+
+test("a failed review shows GitHub's error and keeps the comment", async ({ page }) => {
+  await openMainPr(page, "?mock=failreview");
+  await page.keyboard.press("a");
+  const dialog = page.getByTestId("review-dialog");
+  await dialog.getByTestId("review-body").fill("Ship it");
+  await dialog.getByTestId("review-approve").click();
+  await expect(dialog.getByTestId("review-error")).toHaveText("GitHub API error 502: Server Error");
+  await expect(dialog.getByTestId("review-body")).toHaveValue("Ship it");
+  await expect(dialog.getByTestId("review-success")).toHaveCount(0);
+  expect(await mockReviews(page)).toEqual([]);
+});
+
+test("the 'All files reviewed' screen has the review form", async ({ page }) => {
+  await openMainPr(page);
+  await page.getByTestId("file-filter").fill("web/");
+  await page.keyboard.press("Enter");
+  for (let i = 0; i < 4; i++) await page.keyboard.press("r");
+  const done = page.getByTestId("all-reviewed");
+  await expect(done.getByTestId("review-form")).toBeVisible();
+  // Not focused: review shortcuts keep working until the textarea is clicked.
+  await expect(done.getByTestId("review-body")).not.toBeFocused();
+  await done.getByTestId("review-body").click();
+  await page.keyboard.type("jk");
+  await expect(done).toBeVisible();
+  await done.getByTestId("review-approve").click();
+  await expect(done.getByTestId("review-success")).toContainText("Approved");
+  expect(await mockReviews(page)).toMatchObject([{ number: 482, event: "APPROVE", body: "jk" }]);
 });
 
 test("sign in when unauthenticated", async ({ page }) => {
@@ -329,4 +401,55 @@ test("Ctrl+F finds in the diff: Enter steps, Esc closes, a selection prefills", 
   await expect(status).toHaveText("2 of 2");
   await expect(view.locator(".fc")).toHaveText("splitProps");
   await expect(view.locator(".dt", { has: page.locator(".fc") })).toContainText("splitProps(props");
+});
+
+/** Every <img> in `scope` has decoded (naturalWidth > 0); returns their natural sizes. */
+const loadedImages = (scope: Locator) =>
+  scope.locator("img").evaluateAll((imgs: HTMLImageElement[]) =>
+    imgs.map((i) => (i.complete && i.naturalWidth > 0 ? `${i.naturalWidth}x${i.naturalHeight}` : "not loaded")),
+  );
+
+test("images show before and after", async ({ page }) => {
+  await openMainPr(page);
+  await file(page, "web/assets/logo.png").click();
+  const view = page.locator('[data-testid="image-diff"][data-path="web/assets/logo.png"]');
+  await expect(view).toBeVisible();
+  await expect(view.getByTestId("image-side")).toHaveCount(2);
+  await expect.poll(() => loadedImages(view)).toEqual(["64x64", "96x64"]);
+  await expect(view.getByTestId("image-meta").nth(1)).toContainText("96 × 64");
+  // Unified stacks the same two images.
+  await page.keyboard.press("v");
+  await expect.poll(() => loadedImages(view)).toEqual(["64x64", "96x64"]);
+});
+
+test("SVGs show as images, with their source a toggle away", async ({ page }) => {
+  await openMainPr(page);
+  await file(page, "web/assets/icon.svg").click();
+  const image = page.locator('[data-testid="image-diff"][data-path="web/assets/icon.svg"]');
+  await expect.poll(() => loadedImages(image)).toEqual(["64x64", "64x64"]);
+  const toggle = page.getByTestId("svg-toggle");
+  await expect(toggle.getByText("Image")).toHaveClass(/on/);
+
+  await toggle.getByText("Source").click();
+  await expect(image).toHaveCount(0);
+  const source = page.locator('.diff-view[data-path="web/assets/icon.svg"]');
+  await expect(source.locator(".dc.del .dt", { hasText: "<circle" })).toHaveCount(1);
+  await expect(source.locator(".dc.add .dt", { hasText: "<rect" })).toHaveCount(1);
+
+  await toggle.getByText("Image").click();
+  await expect.poll(() => loadedImages(image)).toEqual(["64x64", "64x64"]);
+});
+
+test("files the app can't show open in their default app", async ({ page }) => {
+  await openMainPr(page);
+  await file(page, "docs/guide.pdf").click();
+  const view = page.locator('.diff-view[data-path="docs/guide.pdf"]');
+  await expect(view).toContainText("Binary file not shown");
+  // Added file: one button, for the new version.
+  await expect(view.getByTestId("open-file")).toHaveCount(1);
+  await view.getByRole("button", { name: "Open with default app" }).click();
+  await expect
+    .poll(() => page.evaluate(() => (window as { __mockOpenedFiles?: unknown[] }).__mockOpenedFiles))
+    .toEqual([{ owner: "acme", repo: "web", number: 482, path: "docs/guide.pdf", side: "new" }]);
+  await expect(page.getByTestId("toast")).toHaveCount(0);
 });

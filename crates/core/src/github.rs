@@ -5,11 +5,14 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION, RETRY_AFTER, USER_AGENT};
 use reqwest::{RequestBuilder, Response, StatusCode};
 use serde::de::DeserializeOwned;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::error::{Error, Result};
-use crate::model::{ChangedFile, FileStatus, InboxReason, PrSummary, RepoSummary, ViewedState};
+use crate::model::{
+    ChangedFile, FileStatus, InboxReason, PrSummary, RepoSummary, ReviewEvent, SubmittedReview,
+    ViewedState,
+};
 
 pub const DEFAULT_API_URL: &str = "https://api.github.com";
 const RAW: &str = "application/vnd.github.raw+json";
@@ -112,6 +115,16 @@ impl GitHub {
             .http
             .get(self.url(path))
             .query(query)
+            .header(ACCEPT, "application/vnd.github+json");
+        let resp = check(self.authed(rb)?.send().await?, path).await?;
+        Ok(resp.json().await?)
+    }
+
+    async fn post_json<T: DeserializeOwned>(&self, path: &str, body: &impl Serialize) -> Result<T> {
+        let rb = self
+            .http
+            .post(self.url(path))
+            .json(body)
             .header(ACCEPT, "application/vnd.github+json");
         let resp = check(self.authed(rb)?.send().await?, path).await?;
         Ok(resp.json().await?)
@@ -392,6 +405,31 @@ impl GitHub {
         })
     }
 
+    /// Submit a review pinned to `commit_id` (the head the viewer reviewed, not whatever
+    /// the branch points to now).
+    pub async fn submit_review(
+        &self,
+        owner: &str,
+        repo: &str,
+        number: u64,
+        commit_id: &str,
+        event: ReviewEvent,
+        body: &str,
+    ) -> Result<SubmittedReview> {
+        let path = format!("/repos/{}/{}/pulls/{number}/reviews", enc(owner), enc(repo));
+        let r: Review = self
+            .post_json(
+                &path,
+                &json!({ "commit_id": commit_id, "body": body, "event": event }),
+            )
+            .await?;
+        Ok(SubmittedReview {
+            id: r.id,
+            url: r.html_url,
+            state: r.state,
+        })
+    }
+
     pub async fn set_file_viewed(&self, pr_id: &str, path: &str, viewed: bool) -> Result<()> {
         let query = if viewed { MARK_VIEWED } else { UNMARK_VIEWED };
         let _: Value = self
@@ -425,7 +463,7 @@ async fn check(resp: Response, what: &str) -> Result<Response> {
     let body = resp.text().await.unwrap_or_default();
     let message = serde_json::from_str::<Value>(&body)
         .ok()
-        .and_then(|v| v.get("message").and_then(Value::as_str).map(str::to_owned))
+        .and_then(|v| api_message(&v))
         .unwrap_or_else(|| body.chars().take(200).collect());
 
     Err(match status {
@@ -460,6 +498,22 @@ async fn check(resp: Response, what: &str) -> Result<Response> {
             message,
         },
     })
+}
+
+/// The useful part of a REST error body. Validation failures (422) put the reason in
+/// `errors` (strings or `{ message }` objects) under a generic "Unprocessable Entity".
+fn api_message(v: &Value) -> Option<String> {
+    let details: Vec<&str> = v
+        .get("errors")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|e| e.as_str().or_else(|| e.get("message")?.as_str()))
+        .collect();
+    if !details.is_empty() {
+        return Some(details.join("; "));
+    }
+    v.get("message").and_then(Value::as_str).map(str::to_owned)
 }
 
 /// Percent-encode one URL path segment.
@@ -734,6 +788,13 @@ struct RestRef {
 }
 
 #[derive(Deserialize)]
+struct Review {
+    id: u64,
+    html_url: String,
+    state: String,
+}
+
+#[derive(Deserialize)]
 struct Compare {
     merge_base_commit: Sha,
 }
@@ -751,6 +812,20 @@ mod tests {
     fn encodes_path_segments() {
         assert_eq!(enc_path("src/a b/#x.ts"), "src/a%20b/%23x.ts");
         assert_eq!(enc("ü"), "%C3%BC");
+    }
+
+    #[test]
+    fn api_message_prefers_validation_details() {
+        let v = json!({ "message": "Validation Failed", "errors": [
+            { "resource": "PullRequestReview", "code": "custom", "message": "Review body is required" },
+            "Can not approve your own pull request",
+        ]});
+        assert_eq!(
+            api_message(&v).as_deref(),
+            Some("Review body is required; Can not approve your own pull request")
+        );
+        let plain = json!({ "message": "Not Found", "errors": [] });
+        assert_eq!(api_message(&plain).as_deref(), Some("Not Found"));
     }
 
     #[test]

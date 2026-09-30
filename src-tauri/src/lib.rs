@@ -8,15 +8,21 @@
 //!   list_repo_prs(owner: String, repo: String) -> Vec<PrSummary>
 //!   get_pr(owner: String, repo: String, number: u64) -> PrDetail
 //!   get_file_diff(owner: String, repo: String, number: u64, path: String) -> FileDiff
+//!   get_file_content(owner: String, repo: String, number: u64, path: String, side: Side) -> raw bytes
+//!   open_file(owner: String, repo: String, number: u64, path: String, side: Side) -> ()
 //!   set_file_viewed(prId: String, path: String, viewed: bool) -> ()
+//!   submit_review(owner: String, repo: String, number: u64, event: ReviewEvent, body: String) -> SubmittedReview
 //!   open_url(url: String) -> ()
 //! Errors are returned as `String` messages.
 //! Updates go through the updater and process plugins, called from src/lib/updater.ts.
 //! The app menu's "Check for Updates…" item emits `CHECK_UPDATES_EVENT` to the UI.
 use std::sync::Arc;
 
-use fast_reviewer_core::model::{AuthStatus, FileDiff, PrDetail, PrSummary, RepoSummary};
+use fast_reviewer_core::model::{
+    AuthStatus, FileDiff, PrDetail, PrSummary, RepoSummary, ReviewEvent, Side, SubmittedReview,
+};
 use fast_reviewer_core::{Config, Service};
+use tauri::ipc::Response;
 use tauri::menu::{Menu, MenuItem};
 use tauri::{AppHandle, Emitter, Runtime, State};
 use tauri_plugin_opener::OpenerExt;
@@ -73,6 +79,43 @@ async fn get_file_diff(
     Ok(core.get_file_diff(&owner, &repo, number, &path).await?)
 }
 
+/// Raw bytes, so the UI gets an `ArrayBuffer` rather than a JSON array of numbers.
+#[tauri::command]
+async fn get_file_content(
+    core: Core<'_>,
+    owner: String,
+    repo: String,
+    number: u64,
+    path: String,
+    side: Side,
+) -> CmdResult<Response> {
+    let file = core
+        .get_file_content(&owner, &repo, number, &path, side)
+        .await?;
+    Ok(Response::new(file.bytes))
+}
+
+/// Writes one side of the file to the temp dir and opens it with the OS default app. The
+/// opener is called from Rust, so it needs no JS capability (and none is granted).
+#[tauri::command]
+async fn open_file(
+    app: tauri::AppHandle,
+    core: Core<'_>,
+    owner: String,
+    repo: String,
+    number: u64,
+    path: String,
+    side: Side,
+) -> CmdResult<()> {
+    let root = std::env::temp_dir().join("fast-reviewer");
+    let file = core
+        .save_temp_copy(&root, &owner, &repo, number, &path, side)
+        .await?;
+    app.opener()
+        .open_path(file.to_string_lossy(), None::<&str>)
+        .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 async fn set_file_viewed(
     core: Core<'_>,
@@ -81,6 +124,20 @@ async fn set_file_viewed(
     viewed: bool,
 ) -> CmdResult<()> {
     Ok(core.set_file_viewed(&pr_id, &path, viewed).await?)
+}
+
+#[tauri::command]
+async fn submit_review(
+    core: Core<'_>,
+    owner: String,
+    repo: String,
+    number: u64,
+    event: ReviewEvent,
+    body: String,
+) -> CmdResult<SubmittedReview> {
+    Ok(core
+        .submit_review(&owner, &repo, number, event, &body)
+        .await?)
 }
 
 #[tauri::command]
@@ -141,7 +198,10 @@ pub fn run() {
             list_repo_prs,
             get_pr,
             get_file_diff,
+            get_file_content,
+            open_file,
             set_file_viewed,
+            submit_review,
             open_url,
         ])
         .run(tauri::generate_context!())

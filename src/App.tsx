@@ -7,6 +7,7 @@ import HelpOverlay from "./components/HelpOverlay";
 import { selectedDiffText } from "./components/FindBar";
 import MainPane from "./components/MainPane";
 import Picker from "./components/Picker";
+import { ReviewDialog } from "./components/ReviewForm";
 import Sidebar from "./components/Sidebar";
 import Toasts from "./components/Toasts";
 import UpdateButton from "./components/UpdateButton";
@@ -170,6 +171,9 @@ function Shell(props: { store: AppStore }) {
           </Show>
           <Show when={s.overlay() === "help"}>
             <HelpOverlay store={s} />
+          </Show>
+          <Show when={s.overlay() === "review" && s.pr()}>
+            <ReviewDialog store={s} />
           </Show>
         </Match>
       </Switch>

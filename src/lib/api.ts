@@ -1,6 +1,15 @@
 // Typed IPC wrapper. Inside Tauri it invokes Rust commands; in a plain browser
 // (dev server, Playwright) it falls back to the in-memory mock backend.
-import type { AuthStatus, FileDiff, PrDetail, PrSummary, RepoSummary } from "./types";
+import type {
+  AuthStatus,
+  FileDiff,
+  PrDetail,
+  PrSummary,
+  RepoSummary,
+  ReviewEvent,
+  Side,
+  SubmittedReview,
+} from "./types";
 
 export interface Backend {
   authStatus(): Promise<AuthStatus>;
@@ -11,7 +20,13 @@ export interface Backend {
   listRepoPrs(owner: string, repo: string): Promise<PrSummary[]>;
   getPr(owner: string, repo: string, number: number): Promise<PrDetail>;
   getFileDiff(owner: string, repo: string, number: number, path: string): Promise<FileDiff>;
+  /** Raw bytes of one side of a file (a version its diff compares); ArrayBuffer-backed, so Blob-ready. */
+  getFileContent(owner: string, repo: string, number: number, path: string, side: Side): Promise<Uint8Array<ArrayBuffer>>;
+  /** Write one side of a file to a temp file and open it with the OS default app. */
+  openFile(owner: string, repo: string, number: number, path: string, side: Side): Promise<void>;
   setFileViewed(prId: string, path: string, viewed: boolean): Promise<void>;
+  /** Review the head commit `getPr` returned. A COMMENT needs a non-empty body. */
+  submitReview(owner: string, repo: string, number: number, event: ReviewEvent, body: string): Promise<SubmittedReview>;
   openUrl(url: string): Promise<void>;
 }
 
@@ -33,7 +48,15 @@ function tauriBackend(): Backend {
     listRepoPrs: (owner, repo) => call("list_repo_prs", { owner, repo }),
     getPr: (owner, repo, number) => call("get_pr", { owner, repo, number }),
     getFileDiff: (owner, repo, number, path) => call("get_file_diff", { owner, repo, number, path }),
+    // Raw responses arrive as an ArrayBuffer; the IPC fallback (postMessage) sends a number array.
+    getFileContent: (owner, repo, number, path, side) =>
+      call<ArrayBuffer | number[]>("get_file_content", { owner, repo, number, path, side }).then((b) =>
+        b instanceof ArrayBuffer ? new Uint8Array(b) : Uint8Array.from(b),
+      ),
+    openFile: (owner, repo, number, path, side) => call("open_file", { owner, repo, number, path, side }),
     setFileViewed: (prId, path, viewed) => call("set_file_viewed", { prId, path, viewed }),
+    submitReview: (owner, repo, number, event, body) =>
+      call("submit_review", { owner, repo, number, event, body }),
     openUrl: (url) => call("open_url", { url }),
   };
 }

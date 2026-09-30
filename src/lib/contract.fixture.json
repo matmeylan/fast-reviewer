@@ -65,11 +65,18 @@
     "oldText": "const a = 1;\nconst b = 2;\n",
     "newText": "const a = 1;\nconst b = 3;\n"
   },
+  "submittedReview": {
+    "id": 80,
+    "url": "https://github.com/octo/app/pull/42#pullrequestreview-80",
+    "state": "APPROVED"
+  },
   "enums": {
     "authSource": ["env", "ghCli", "keychain"],
     "inboxReason": ["reviewRequested", "authored", "other"],
     "fileStatus": ["added", "removed", "modified", "renamed", "copied", "changed"],
     "viewedState": ["VIEWED", "UNVIEWED", "DISMISSED"],
-    "lineKind": ["context", "add", "del"]
+    "lineKind": ["context", "add", "del"],
+    "reviewEvent": ["COMMENT", "APPROVE"],
+    "side": ["old", "new"]
   }
 }

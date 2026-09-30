@@ -32,6 +32,8 @@ export interface PrSummary {
 
 export type FileStatus = "added" | "removed" | "modified" | "renamed" | "copied" | "changed";
 export type ViewedState = "VIEWED" | "UNVIEWED" | "DISMISSED";
+/** A version of a changed file: the merge base ("old", at `previousPath` for renames) or the PR head ("new"). */
+export type Side = "old" | "new";
 
 export interface ChangedFile {
   path: string;
@@ -98,4 +100,15 @@ export interface FileDiff {
   /** Full old/new file text so the UI can expand context. Null when absent (added/removed/binary). */
   oldText: string | null;
   newText: string | null;
+}
+
+/** What a submitted review does. Same values as GitHub's `event` field. */
+export type ReviewEvent = "COMMENT" | "APPROVE";
+
+export interface SubmittedReview {
+  id: number;
+  /** The review on github.com. */
+  url: string;
+  /** GitHub's review state, e.g. "COMMENTED" or "APPROVED". */
+  state: string;
 }

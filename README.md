@@ -11,8 +11,11 @@ A fast desktop app for reviewing GitHub pull requests: a file tree on the left, 
 - **PR picker** (`⌘K`): PRs waiting for your review and your own PRs. You can also fuzzy-search your repos and browse their open PRs, or paste a PR URL or `owner/repo#123`.
 - **File tree**: folders first, then files, both alphabetical. Single-child folder chains are compacted (`src/lib/utils`). Styled after JetBrains IDEs: each file has its file-type icon (IntelliJ's icon set) and its name is colored by change status (green added, blue modified or renamed, gray struck-through deleted). Viewed files are dimmed with a check mark; hover a row to toggle it. Folders show how many files are left to review, with indent guides. Switch to a flat list with folder paths from the button next to the filter. The header shows progress. Filter with `/`; matches are highlighted. GitHub lists at most 3,000 files per PR; for larger PRs the sidebar shows a "Showing N of M files" warning.
 - **Diff**: split (side by side) or unified view. Changed lines are tinted, and the exact characters that changed inside a modified line get a stronger highlight. You can expand hidden context around hunks. Code is selectable; copying gives just the code (no line numbers), and in split view only the side you started selecting on.
+- **Images**: changed PNG, JPEG, GIF, WebP, AVIF, BMP, ICO and SVG files show the before and after images (side by side in split view, stacked in unified), over a checkerboard so transparency shows, with their dimensions and file size. SVGs open as images (in an `<img>`, so scripts in them never run); switch to **Source** for their text diff.
+- **Open with default app**: files the diff can't show (PDFs, archives, fonts, files too large to diff) have buttons to open the new or old version in the app your OS uses for that file type. The file is written to a temp folder first.
 - **Find in file** (`⌘F`): highlights every match in the current diff, including lines scrolled out of view; `Enter` / `⇧Enter` (or `⌘G` / `⇧⌘G`) step through them. With text selected in the diff, `⌘F` searches for it, starting at that occurrence. The query stays when you move to another file.
 - **Syntax highlighting**: VS Code-quality highlighting (Shiki / TextMate grammars) for TypeScript, TSX, JavaScript, HTML, CSS, Python, JSON, Markdown, Rust, Go and more than 200 other languages. Highlighting runs in a Web Worker, so it never blocks scrolling. Grammars load on demand; when a PR opens, the grammars for its languages are loaded and warmed while the first diff is fetched.
+- **Submit your review**: after the last file, the "All files reviewed" screen has a comment box with **Comment** and **Approve**; the **Review** button in the header (or `a`) opens the same form at any time. `⌘Enter` sends the comment. The review is pinned to the commit you reviewed. GitHub doesn't let you approve your own PR, so Approve is disabled there. If GitHub rejects the review, its reason is shown and your text is kept.
 - **GitHub sync**: "viewed" state is read from GitHub and written back in the background. It is the same checkbox as on github.com. If the write fails, the change is undone and a message is shown. If GitHub's GraphQL API is unavailable (some proxies and GHE setups), PRs load over REST instead; REST has no viewed state, so every file starts unviewed.
 - **Speed**: the diffs of the next 3 unviewed files are fetched ahead of time, so `r` and `s` switch files in under 20 ms. Only visible rows are rendered, which keeps 5,000-line diffs smooth. Diffs are computed in Rust and cached in memory, and file contents are cached on disk by commit SHA.
 - Light and dark mode follow the system setting.
@@ -31,6 +34,7 @@ A fast desktop app for reviewing GitHub pull requests: a file tree on the left, 
 | `/` | Filter files |
 | `⌘F` / `Ctrl+F` | Find in file (searches for the selected text, if any) |
 | `⌘G` / `⇧⌘G` | Next / previous match (also `Enter` / `⇧Enter` in the find bar) |
+| `a` | Comment on or approve the PR (`⌘Enter` / `Ctrl+Enter` in the comment box sends a comment) |
 | `o` | Open the PR in the browser |
 | `⌘K` / `Ctrl+K` | Open a pull request |
 | `?` | Show shortcuts |
@@ -131,7 +135,7 @@ pnpm tauri build                 # macOS: target/release/bundle/macos/Fast Revie
 pnpm tauri build --no-bundle     # just the binary: target/release/fast-reviewer
 ```
 
-The mock backend is used automatically outside Tauri. It serves a 28-file fixture PR, a 2,400-file PR and a 3,000-line generated file. Flags: `?mock=unauth` starts signed out, `?mock=failviewed` makes viewed-sync fail, and `?mockViewedDelay=<ms>` makes viewed-sync take that long.
+The mock backend is used automatically outside Tauri. It serves a 30-file fixture PR (with PNG, SVG and PDF files), a 2,400-file PR and a 3,000-line generated file. Flags: `?mock=unauth` starts signed out, `?mock=failviewed` makes viewed-sync fail, `?mock=failreview` makes submitting a review fail, and `?mockViewedDelay=<ms>` makes viewed-sync take that long.
 
 ## Tests
 

@@ -11,6 +11,7 @@ export type Action =
   | "nextHunk"
   | "prevHunk"
   | "openBrowser"
+  | "writeReview"
   | "picker"
   | "help"
   | "escape"
@@ -20,7 +21,7 @@ export type Action =
   | "findPrev";
 
 export type Mode = "split" | "unified";
-export type Overlay = "none" | "picker" | "help";
+export type Overlay = "none" | "picker" | "help" | "review";
 
 export interface KeyLike {
   key: string;
@@ -42,6 +43,7 @@ const PLAIN_KEYS: Record<string, Action> = {
   n: "nextHunk",
   p: "prevHunk",
   o: "openBrowser",
+  a: "writeReview",
   "?": "help",
   "/": "focusFilter",
 };
@@ -191,6 +193,8 @@ export function reduce(s: NavState, action: Action): Update {
       return { effects: [{ type: "prevHunk" }] };
     case "openBrowser":
       return { effects: [{ type: "openBrowser" }] };
+    case "writeReview":
+      return { overlay: "review", effects: [] };
     case "focusFilter":
       return { effects: [{ type: "focusFilter" }] };
     case "find":

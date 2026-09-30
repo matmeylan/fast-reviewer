@@ -125,7 +125,7 @@ describe("app store", () => {
     const { store, dispose } = setup();
     await openMain(store);
     store.setFilter("web/");
-    expect(store.order()).toEqual(["web/assets/logo.png", "web/index.html", "web/styles.css"]);
+    expect(store.order()).toEqual(["web/assets/icon.svg", "web/assets/logo.png", "web/index.html", "web/styles.css"]);
     dispose();
   });
 
@@ -377,6 +377,139 @@ describe("diff cache", () => {
     expect(calls(first)).toBe(2);
     await tick();
     expect(store.diff().diff?.path).toBe(first);
+    dispose();
+  });
+
+  it("reads and opens files of the current PR; a failed open becomes a toast", async () => {
+    const backend = createMockBackend({ latencyMs: 0 });
+    const open = vi.spyOn(backend, "openFile");
+    const { store, dispose } = setup(backend);
+    await openMain(store);
+    const png = await store.fileContent("web/assets/logo.png", "new");
+    expect([...png.slice(1, 4)].map((c) => String.fromCharCode(c)).join("")).toBe("PNG");
+    await store.openFile("docs/guide.pdf", "new");
+    expect(open).toHaveBeenCalledWith("acme", "web", 482, "docs/guide.pdf", "new");
+    expect(store.toasts()).toHaveLength(0);
+    // An added file has no old version.
+    await store.openFile("docs/guide.pdf", "old");
+    expect(store.toasts()).toHaveLength(1);
+    expect(store.toasts()[0].text).toMatch(/^Couldn't open guide\.pdf: Not found/);
+    dispose();
+  });
+});
+
+describe("review submission", () => {
+  it("comments on the reviewed head commit, clears the draft and toasts", async () => {
+    const backend = createMockBackend({ latencyMs: 0 });
+    const { store, dispose } = setup(backend);
+    await openMain(store);
+    store.setReviewDraft("  Looks good, one nit  ");
+    const done = store.submitReview("COMMENT");
+    expect(store.reviewSubmitting()).toBe(true);
+    expect(await done).toBe(true);
+    expect(store.reviewSubmitting()).toBe(false);
+    expect(store.reviewDraft()).toBe("");
+    expect(store.reviewResult()).toMatchObject({ event: "COMMENT", state: "COMMENTED" });
+    expect(store.reviewResult()!.url).toContain(store.pr()!.url);
+    expect(store.toasts()).toMatchObject([{ text: "Review submitted", kind: "info" }]);
+    expect(backend.reviews).toMatchObject([
+      { owner: "acme", repo: "web", number: 482, event: "COMMENT", body: "Looks good, one nit", commitId: store.pr()!.headSha },
+    ]);
+    dispose();
+  });
+
+  it("approves without a comment", async () => {
+    const backend = createMockBackend({ latencyMs: 0 });
+    const { store, dispose } = setup(backend);
+    await openMain(store);
+    expect(store.ownPr()).toBe(false);
+    expect(await store.submitReview("APPROVE")).toBe(true);
+    expect(store.reviewResult()?.state).toBe("APPROVED");
+    expect(store.toasts()).toMatchObject([{ text: "Approved", kind: "info" }]);
+    expect(backend.reviews[0]).toMatchObject({ event: "APPROVE", body: "" });
+    dispose();
+  });
+
+  it("does not send a comment without text", async () => {
+    const backend = createMockBackend({ latencyMs: 0 });
+    const spy = vi.spyOn(backend, "submitReview");
+    const { store, dispose } = setup(backend);
+    await openMain(store);
+    store.setReviewDraft(" \n ");
+    expect(await store.submitReview("COMMENT")).toBe(false);
+    expect(spy).not.toHaveBeenCalled();
+    expect(store.reviewSubmitting()).toBe(false);
+    dispose();
+  });
+
+  it("keeps the draft and shows the error when GitHub rejects the review", async () => {
+    const { store, dispose } = setup(createMockBackend({ latencyMs: 0, failReview: true }));
+    await openMain(store);
+    store.setReviewDraft("Ship it");
+    expect(await store.submitReview("APPROVE")).toBe(false);
+    expect(store.reviewError()).toBe("GitHub API error 502: Server Error");
+    expect(store.reviewDraft()).toBe("Ship it");
+    expect(store.reviewSubmitting()).toBe(false);
+    expect(store.reviewResult()).toBeNull();
+    // A retry clears the old error while it runs.
+    const retry = store.submitReview("COMMENT");
+    expect(store.reviewError()).toBeNull();
+    await retry;
+    dispose();
+  });
+
+  it("knows the viewer's own PR, which GitHub will not let them approve", async () => {
+    const { store, dispose } = setup();
+    await store.init();
+    await store.openPr({ owner: "acme", repo: "web", number: 475 });
+    expect(store.ownPr()).toBe(true);
+    expect(await store.submitReview("APPROVE")).toBe(false);
+    expect(store.reviewError()).toBe("GitHub API error 422: Can not approve your own pull request");
+    dispose();
+  });
+
+  it("keeps the draft per PR: reset when another PR opens, kept when the same one reloads", async () => {
+    const { store, dispose } = setup();
+    await openMain(store);
+    store.setReviewDraft("half-written");
+    await store.openPr({ owner: "acme", repo: "web", number: 482 });
+    expect(store.reviewDraft()).toBe("half-written");
+    await store.openPr({ owner: "acme", repo: "api", number: 91 });
+    expect(store.reviewDraft()).toBe("");
+    dispose();
+  });
+
+  it("a review that finishes after switching PRs only toasts", async () => {
+    const backend = createMockBackend({ latencyMs: 0 });
+    let finish!: () => void;
+    const submit = backend.submitReview;
+    backend.submitReview = (...args) =>
+      new Promise((resolve, reject) => {
+        finish = () => void submit(...args).then(resolve, reject);
+      });
+    const { store, dispose } = setup(backend);
+    await openMain(store);
+    store.setReviewDraft("LGTM");
+    const pending = store.submitReview("COMMENT");
+    await store.openPr({ owner: "acme", repo: "api", number: 91 });
+    expect(store.reviewSubmitting()).toBe(false);
+    finish();
+    expect(await pending).toBe(false);
+    expect(store.reviewResult()).toBeNull();
+    expect(store.toasts().at(-1)).toMatchObject({ text: "Review submitted on acme/web#482", kind: "info" });
+    dispose();
+  });
+
+  it("opens the submitted review on GitHub and can start over", async () => {
+    const backend = createMockBackend({ latencyMs: 0 });
+    const open = vi.spyOn(backend, "openUrl").mockResolvedValue();
+    const { store, dispose } = setup(backend);
+    await openMain(store);
+    await store.submitReview("APPROVE");
+    store.openReview();
+    expect(open).toHaveBeenCalledWith(store.reviewResult()!.url);
+    store.newReview();
+    expect(store.reviewResult()).toBeNull();
     dispose();
   });
 });
