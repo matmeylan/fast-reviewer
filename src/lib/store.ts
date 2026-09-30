@@ -296,7 +296,7 @@ export function createAppStore(backend: Backend) {
     try {
       const r = await backend.submitReview(p.owner, p.repo, p.number, event, body);
       if (seq !== reviewSeq) {
-        toast(`${label} on ${prKey(p)}`);
+        toast(`${label} on ${prKey(p)}`, "info");
         return false;
       }
       batch(() => {
@@ -304,7 +304,7 @@ export function createAppStore(backend: Backend) {
         setReviewDraft("");
         setReviewSubmitting(false);
       });
-      toast(label);
+      toast(label, "info");
       return true;
     } catch (e) {
       if (seq !== reviewSeq) {

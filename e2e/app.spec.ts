@@ -221,6 +221,75 @@ test("help overlay", async ({ page }) => {
   await expect(page.getByTestId("help")).toBeHidden();
 });
 
+type MockReview = { number: number; event: string; body: string };
+const mockReviews = (page: Page) =>
+  page.evaluate(() => (window as unknown as { __mockReviews: MockReview[] }).__mockReviews);
+
+test("review dialog: Comment needs text; Approve submits to GitHub", async ({ page }) => {
+  await openMainPr(page);
+  await page.getByTestId("review-button").click();
+  const dialog = page.getByTestId("review-dialog");
+  await expect(dialog).toContainText("acme/web#482");
+  await expect(dialog.getByTestId("review-comment")).toBeDisabled();
+  await dialog.getByTestId("review-body").fill("Looks great, thanks!");
+  await expect(dialog.getByTestId("review-comment")).toBeEnabled();
+  await dialog.getByTestId("review-approve").click();
+  await expect(dialog.getByTestId("review-success")).toContainText("Approved");
+  await expect(dialog.getByTestId("review-open")).toBeVisible();
+  expect(await mockReviews(page)).toMatchObject([{ number: 482, event: "APPROVE", body: "Looks great, thanks!" }]);
+  await expect(page.getByTestId("toast")).toContainText("Approved");
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  // Shortcuts work again once the dialog is closed.
+  await page.keyboard.press("j");
+  expect(await selectedPath(page)).toBe("api/routes/users.py");
+});
+
+test("a opens the review dialog; Ctrl+Enter comments", async ({ page }) => {
+  await openMainPr(page);
+  await page.keyboard.press("a");
+  const dialog = page.getByTestId("review-dialog");
+  const body = dialog.getByTestId("review-body");
+  await expect(body).toBeFocused();
+  // The key that opened the dialog is not typed into it.
+  await expect(body).toHaveValue("");
+  await page.keyboard.type("nit: rename");
+  await page.keyboard.press("Control+Enter");
+  await expect(dialog.getByTestId("review-success")).toContainText("Review submitted");
+  expect(await mockReviews(page)).toMatchObject([{ number: 482, event: "COMMENT", body: "nit: rename" }]);
+  await dialog.getByTestId("review-again").click();
+  await expect(dialog.getByTestId("review-body")).toHaveValue("");
+});
+
+test("a failed review shows GitHub's error and keeps the comment", async ({ page }) => {
+  await openMainPr(page, "?mock=failreview");
+  await page.keyboard.press("a");
+  const dialog = page.getByTestId("review-dialog");
+  await dialog.getByTestId("review-body").fill("Ship it");
+  await dialog.getByTestId("review-approve").click();
+  await expect(dialog.getByTestId("review-error")).toHaveText("GitHub API error 502: Server Error");
+  await expect(dialog.getByTestId("review-body")).toHaveValue("Ship it");
+  await expect(dialog.getByTestId("review-success")).toHaveCount(0);
+  expect(await mockReviews(page)).toEqual([]);
+});
+
+test("the 'All files reviewed' screen has the review form", async ({ page }) => {
+  await openMainPr(page);
+  await page.getByTestId("file-filter").fill("web/");
+  await page.keyboard.press("Enter");
+  for (let i = 0; i < 3; i++) await page.keyboard.press("r");
+  const done = page.getByTestId("all-reviewed");
+  await expect(done.getByTestId("review-form")).toBeVisible();
+  // Not focused: review shortcuts keep working until the textarea is clicked.
+  await expect(done.getByTestId("review-body")).not.toBeFocused();
+  await done.getByTestId("review-body").click();
+  await page.keyboard.type("jk");
+  await expect(done).toBeVisible();
+  await done.getByTestId("review-approve").click();
+  await expect(done.getByTestId("review-success")).toContainText("Approved");
+  expect(await mockReviews(page)).toMatchObject([{ number: 482, event: "APPROVE", body: "jk" }]);
+});
+
 test("sign in when unauthenticated", async ({ page }) => {
   await page.goto("/?mock=unauth");
   await expect(page.getByTestId("auth")).toBeVisible();

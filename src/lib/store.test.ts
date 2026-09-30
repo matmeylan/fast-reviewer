@@ -394,7 +394,7 @@ describe("review submission", () => {
     expect(store.reviewDraft()).toBe("");
     expect(store.reviewResult()).toMatchObject({ event: "COMMENT", state: "COMMENTED" });
     expect(store.reviewResult()!.url).toContain(store.pr()!.url);
-    expect(store.toasts().map((t) => t.text)).toEqual(["Review submitted"]);
+    expect(store.toasts()).toMatchObject([{ text: "Review submitted", kind: "info" }]);
     expect(backend.reviews).toMatchObject([
       { owner: "acme", repo: "web", number: 482, event: "COMMENT", body: "Looks good, one nit", commitId: store.pr()!.headSha },
     ]);
@@ -408,7 +408,7 @@ describe("review submission", () => {
     expect(store.ownPr()).toBe(false);
     expect(await store.submitReview("APPROVE")).toBe(true);
     expect(store.reviewResult()?.state).toBe("APPROVED");
-    expect(store.toasts().map((t) => t.text)).toEqual(["Approved"]);
+    expect(store.toasts()).toMatchObject([{ text: "Approved", kind: "info" }]);
     expect(backend.reviews[0]).toMatchObject({ event: "APPROVE", body: "" });
     dispose();
   });
@@ -479,7 +479,7 @@ describe("review submission", () => {
     finish();
     expect(await pending).toBe(false);
     expect(store.reviewResult()).toBeNull();
-    expect(store.toasts().at(-1)?.text).toBe("Review submitted on acme/web#482");
+    expect(store.toasts().at(-1)).toMatchObject({ text: "Review submitted on acme/web#482", kind: "info" });
     dispose();
   });
 

@@ -4,14 +4,16 @@ import type { AppStore } from "../lib/store";
 import DiffView from "./DiffView";
 import FindBar from "./FindBar";
 import { Counts } from "./FileTree";
+import ReviewForm from "./ReviewForm";
 import CircleCheckBig from "lucide-solid/icons/circle-check-big";
 import Columns2 from "lucide-solid/icons/columns-2";
 import FileCode from "lucide-solid/icons/file-code";
+import MessageSquare from "lucide-solid/icons/message-square";
 import Rows2 from "lucide-solid/icons/rows-2";
 import TriangleAlert from "lucide-solid/icons/triangle-alert";
 import { Button } from "./ui/button";
 import { Checkbox } from "./ui/checkbox";
-import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "./ui/empty";
+import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "./ui/empty";
 import { Kbd } from "./ui/kbd";
 import { Spinner } from "./ui/spinner";
 
@@ -72,6 +74,21 @@ export default function MainPane(props: { store: AppStore }) {
             </>
           )}
         </Show>
+        <Show when={s.pr()}>
+          <Button
+            variant="outline"
+            size="sm"
+            class="flex-none"
+            onClick={() => s.dispatch("writeReview")}
+            title="Comment or approve (a)"
+            data-testid="review-button"
+          >
+            <Show when={s.reviewResult()} fallback={<MessageSquare />}>
+              <CircleCheckBig class="text-success" />
+            </Show>
+            Review
+          </Button>
+        </Show>
         <div
           class={SEGMENTS}
           role="group"
@@ -126,6 +143,9 @@ export default function MainPane(props: { store: AppStore }) {
                   <Kbd>{isMac ? "⌘K" : "Ctrl K"}</Kbd> to open the next PR.
                 </EmptyDescription>
               </EmptyHeader>
+              <EmptyContent class="mt-2 max-w-md">
+                <ReviewForm store={s} />
+              </EmptyContent>
             </Empty>
           </Match>
           <Match when={s.diff().error}>

@@ -24,6 +24,7 @@ describe("keyToAction", () => {
     expect(keyToAction({ key: "ArrowDown" }, false)).toBe("next");
     expect(keyToAction({ key: "k" }, false)).toBe("prev");
     expect(keyToAction({ key: "?" }, false)).toBe("help");
+    expect(keyToAction({ key: "a" }, false)).toBe("writeReview");
     expect(keyToAction({ key: "x" }, false)).toBeNull();
   });
 
@@ -137,6 +138,14 @@ describe("reduce", () => {
     expect(reduce(state({ overlay: "help" }), "escape").overlay).toBe("none");
     expect(reduce(state({ overlay: "help" }), "review")).toEqual({ effects: [] });
     expect(reduce(state(), "escape")).toEqual({ effects: [] });
+  });
+
+  it("a opens the review dialog; escape closes it; it does not open over another overlay", () => {
+    expect(reduce(state(), "writeReview")).toEqual({ overlay: "review", effects: [] });
+    expect(reduce(state({ done: true }), "writeReview")).toEqual({ overlay: "review", effects: [] });
+    expect(reduce(state({ overlay: "review" }), "escape")).toEqual({ overlay: "none", effects: [] });
+    expect(reduce(state({ overlay: "review" }), "next")).toEqual({ effects: [] });
+    expect(reduce(state({ overlay: "picker" }), "writeReview")).toEqual({ effects: [] });
   });
 
   it("hunk navigation and open browser are effects", () => {
