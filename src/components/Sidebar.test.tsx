@@ -39,6 +39,25 @@ describe("Sidebar", () => {
     dispose();
   });
 
+  it("shows the PR state", async () => {
+    const { store, dispose } = await openWith(createMockBackend({ latencyMs: 0 }));
+    const { getByTestId } = render(() => <Sidebar store={store} />);
+    expect(getByTestId("pr-state").textContent).toBe("Open");
+    dispose();
+  });
+
+  it("shows a merged PR as merged", async () => {
+    const backend = createMockBackend({ latencyMs: 0 });
+    const real = backend.getPr;
+    backend.getPr = async (...args) => ({ ...(await real(...args)), state: "merged" });
+    const { store, dispose } = await openWith(backend);
+    const { getByTestId } = render(() => <Sidebar store={store} />);
+    const badge = getByTestId("pr-state");
+    expect(badge.textContent).toBe("Merged");
+    expect(badge.dataset.state).toBe("merged");
+    dispose();
+  });
+
   it("shows no warning for a complete file list", async () => {
     const { store, dispose } = await openWith(createMockBackend({ latencyMs: 0 }));
     const { queryByTestId, getByTestId } = render(() => <Sidebar store={store} />);

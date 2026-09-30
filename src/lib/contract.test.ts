@@ -12,6 +12,7 @@ import type {
   Hunk,
   LineKind,
   PrDetail,
+  PrState,
   PrSummary,
   RepoSummary,
   ReviewEvent,
@@ -31,7 +32,7 @@ const prSummaryKeys = keys<PrSummary>({
   isDraft: true, updatedAt: true, reason: true,
 });
 const prDetailKeys = keys<PrDetail>({
-  id: true, owner: true, repo: true, number: true, title: true, author: true, url: true,
+  id: true, owner: true, repo: true, number: true, title: true, author: true, url: true, state: true,
   baseRef: true, headRef: true, baseSha: true, headSha: true, files: true,
   totalFiles: true, filesTruncated: true,
 });
@@ -52,6 +53,7 @@ const enums = {
   authSource: all<AuthSource>()(["env", "ghCli", "keychain"] as const),
   inboxReason: all<PrSummary["reason"]>()(["reviewRequested", "authored", "other"] as const),
   fileStatus: all<FileStatus>()(["added", "removed", "modified", "renamed", "copied", "changed"] as const),
+  prState: all<PrState>()(["open", "draft", "merged", "closed"] as const),
   viewedState: all<ViewedState>()(["VIEWED", "UNVIEWED", "DISMISSED"] as const),
   lineKind: all<LineKind>()(["context", "add", "del"] as const),
   reviewEvent: all<ReviewEvent>()(["COMMENT", "APPROVE"] as const),

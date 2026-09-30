@@ -1,17 +1,46 @@
-import { createEffect, createSignal, on, Show } from "solid-js";
+import { createEffect, createSignal, on, Show, type Component } from "solid-js";
+import { Dynamic } from "solid-js/web";
 import GitBranch from "lucide-solid/icons/git-branch";
+import GitMerge from "lucide-solid/icons/git-merge";
+import GitPullRequest from "lucide-solid/icons/git-pull-request";
+import GitPullRequestClosed from "lucide-solid/icons/git-pull-request-closed";
+import GitPullRequestDraft from "lucide-solid/icons/git-pull-request-draft";
 import Search from "lucide-solid/icons/search";
 import TriangleAlert from "lucide-solid/icons/triangle-alert";
 import { storage, type AppStore } from "../lib/store";
+import type { PrState } from "../lib/types";
 import ListIcon from "lucide-solid/icons/list";
 import ListTree from "lucide-solid/icons/list-tree";
 import FileTree, { type TreeView } from "./FileTree";
+import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { InputGroup, InputGroupAddon, inputGroupControlClass } from "./ui/input";
 import { Kbd } from "./ui/kbd";
 import { Progress } from "./ui/progress";
 
 const KEY_VIEW = "fr.treeView";
+
+/** GitHub's state colors: green open, gray draft, purple merged, red closed. */
+const PR_STATE: Record<PrState, { label: string; icon: Component<{ class?: string }>; class: string }> = {
+  open: { label: "Open", icon: GitPullRequest, class: "bg-success/10 text-success" },
+  draft: { label: "Draft", icon: GitPullRequestDraft, class: "bg-muted text-muted-foreground" },
+  merged: {
+    label: "Merged",
+    icon: GitMerge,
+    class: "bg-violet-500/10 text-violet-700 dark:text-violet-400",
+  },
+  closed: { label: "Closed", icon: GitPullRequestClosed, class: "bg-destructive/10 text-destructive" },
+};
+
+function PrStateBadge(props: { state: PrState }) {
+  const st = () => PR_STATE[props.state];
+  return (
+    <Badge class={st().class} data-testid="pr-state" data-state={props.state}>
+      <Dynamic component={st().icon} />
+      {st().label}
+    </Badge>
+  );
+}
 
 export default function Sidebar(props: { store: AppStore; treeActive?: boolean }) {
   const s = props.store;
@@ -46,6 +75,7 @@ export default function Sidebar(props: { store: AppStore; treeActive?: boolean }
                 {pr().title}
               </div>
               <div class="flex min-w-0 items-center gap-2 text-xs whitespace-nowrap text-muted-foreground">
+                <PrStateBadge state={pr().state} />
                 <span class="pr-ref">
                   {pr().owner}/{pr().repo} <span class="font-medium text-foreground">#{pr().number}</span>
                 </span>

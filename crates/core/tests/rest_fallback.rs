@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use fast_reviewer_core::auth::AuthConfig;
-use fast_reviewer_core::model::{FileStatus, LineKind, ViewedState};
+use fast_reviewer_core::model::{FileStatus, LineKind, PrState, ViewedState};
 use fast_reviewer_core::{Config, Error, Service};
 use serde_json::{json, Value};
 use wiremock::matchers::{header, method, path, query_param};
@@ -112,6 +112,7 @@ async fn graphql_403_falls_back_to_rest() {
     assert_eq!(pr.title, "Add things");
     assert_eq!(pr.author, "alice");
     assert_eq!(pr.url, "https://github.com/o/r/pull/9");
+    assert_eq!(pr.state, PrState::Open);
     assert_eq!(
         (pr.base_ref.as_str(), pr.head_ref.as_str()),
         ("main", "feature")
@@ -130,6 +131,26 @@ async fn graphql_403_falls_back_to_rest() {
             && f.previous_path.is_none()
             && (f.additions, f.deletions) == (3, 1)));
     server.verify().await;
+}
+
+#[tokio::test]
+async fn rest_pull_state_maps_to_pr_state() {
+    for (state, merged, draft, want) in [
+        ("open", false, true, PrState::Draft),
+        ("closed", true, false, PrState::Merged),
+        ("closed", false, true, PrState::Closed),
+    ] {
+        let (server, svc) = setup().await;
+        mount_graphql(&server, graphql_unavailable()).await;
+        let mut pull = rest_pull();
+        pull["state"] = json!(state);
+        pull["merged"] = json!(merged);
+        pull["draft"] = json!(draft);
+        mount_pull(&server, ResponseTemplate::new(200).set_body_json(pull), 1).await;
+        mount_files(&server, vec![rest_file("a", "modified", 1, 0)]).await;
+        let pr = svc.get_pr("o", "r", 9).await.unwrap();
+        assert_eq!(pr.state, want, "{state} merged={merged} draft={draft}");
+    }
 }
 
 #[tokio::test]
