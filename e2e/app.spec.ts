@@ -128,6 +128,17 @@ test("v toggles split/unified and persists", async ({ page }) => {
   await expect(page.getByTestId("mode-toggle").getByText("Split")).toHaveClass(/on/);
 });
 
+test("added files show unified, and the next file is split again", async ({ page }) => {
+  await openMainPr(page);
+  const mode = page.getByTestId("mode-toggle");
+  await file(page, "api/__init__.py").click();
+  await expect(mode.getByText("Unified")).toHaveClass(/on/);
+  await expect(page.locator(".diff-view.unified")).toBeVisible();
+  await file(page, "api/server.py").click();
+  await expect(mode.getByText("Split")).toHaveClass(/on/);
+  await expect(page.locator(".diff-view.split")).toBeVisible();
+});
+
 test("Cmd/Ctrl+K opens the picker; accepts pasted URLs; esc closes", async ({ page }) => {
   await openMainPr(page);
   await page.keyboard.press("Control+k");

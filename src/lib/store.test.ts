@@ -121,6 +121,50 @@ describe("app store", () => {
     again.dispose();
   });
 
+  it("shows added files unified, then returns to the preferred split", async () => {
+    const { store, dispose } = setup();
+    await openMain(store);
+    const show = async (path: string) => {
+      store.select(path);
+      await vi.waitFor(() => expect(store.diff().diff?.path).toBe(path));
+    };
+    await show("api/server.py");
+    expect(store.viewMode()).toBe("split");
+
+    await show("api/__init__.py");
+    expect(store.viewMode()).toBe("unified");
+    expect(store.mode()).toBe("split");
+    // Picking the mode already shown doesn't change the preference.
+    store.setMode("unified");
+    expect(store.mode()).toBe("split");
+
+    await show("api/server.py");
+    expect(store.viewMode()).toBe("split");
+
+    // v on an added file shows it split, and keeps split as the preference.
+    await show("tests/test_orders.py");
+    store.dispatch("toggleMode");
+    expect(store.viewMode()).toBe("split");
+    expect(store.mode()).toBe("split");
+    // Another added file is unified again.
+    await show("api/__init__.py");
+    expect(store.viewMode()).toBe("unified");
+    dispose();
+  });
+
+  it("keeps a unified preference on added files", async () => {
+    const { store, dispose } = setup();
+    await openMain(store);
+    store.setMode("unified");
+    store.select("api/__init__.py");
+    await vi.waitFor(() => expect(store.diff().diff?.path).toBe("api/__init__.py"));
+    expect(store.viewMode()).toBe("unified");
+    store.dispatch("toggleMode");
+    expect(store.viewMode()).toBe("split");
+    expect(store.mode()).toBe("split");
+    dispose();
+  });
+
   it("filter narrows the navigation order", async () => {
     const { store, dispose } = setup();
     await openMain(store);
