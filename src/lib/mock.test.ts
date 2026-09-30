@@ -62,6 +62,17 @@ describe("mock backend", () => {
     expect((await b.setToken("ghp_abcdef")).login).toBe("octocat");
   });
 
+  it("records reviews and rejects the ones GitHub would", async () => {
+    const b = createMockBackend({ latencyMs: 0 });
+    await expect(b.submitReview("acme", "web", 482, "COMMENT", "  ")).rejects.toThrow("Write a comment");
+    await expect(b.submitReview("acme", "web", 475, "APPROVE", "")).rejects.toThrow("approve your own");
+    const r = await b.submitReview("acme", "web", 482, "APPROVE", "Nice");
+    expect(r.state).toBe("APPROVED");
+    expect(b.reviews).toEqual([expect.objectContaining({ id: r.id, number: 482, event: "APPROVE", body: "Nice" })]);
+    const failing = createMockBackend({ latencyMs: 0, failReview: true });
+    await expect(failing.submitReview("acme", "web", 482, "APPROVE", "")).rejects.toThrow("502");
+  });
+
   it("a slow setFileViewed does not delay getFileDiff (no shared queue)", async () => {
     const b = createMockBackend({ latencyMs: 1, viewedDelayMs: 500 });
     const pr = await b.getPr("acme", "web", 482);

@@ -143,3 +143,21 @@ pub struct FileDiff {
     pub old_text: Option<String>,
     pub new_text: Option<String>,
 }
+
+/// What a submitted review does. Serialized like GitHub's `event` field.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ReviewEvent {
+    Comment,
+    Approve,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubmittedReview {
+    pub id: u64,
+    /// The review on github.com.
+    pub url: String,
+    /// GitHub's review state, e.g. `COMMENTED` or `APPROVED`.
+    pub state: String,
+}

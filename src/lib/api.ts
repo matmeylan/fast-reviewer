@@ -1,6 +1,14 @@
 // Typed IPC wrapper. Inside Tauri it invokes Rust commands; in a plain browser
 // (dev server, Playwright) it falls back to the in-memory mock backend.
-import type { AuthStatus, FileDiff, PrDetail, PrSummary, RepoSummary } from "./types";
+import type {
+  AuthStatus,
+  FileDiff,
+  PrDetail,
+  PrSummary,
+  RepoSummary,
+  ReviewEvent,
+  SubmittedReview,
+} from "./types";
 
 export interface Backend {
   authStatus(): Promise<AuthStatus>;
@@ -12,6 +20,8 @@ export interface Backend {
   getPr(owner: string, repo: string, number: number): Promise<PrDetail>;
   getFileDiff(owner: string, repo: string, number: number, path: string): Promise<FileDiff>;
   setFileViewed(prId: string, path: string, viewed: boolean): Promise<void>;
+  /** Review the head commit `getPr` returned. A COMMENT needs a non-empty body. */
+  submitReview(owner: string, repo: string, number: number, event: ReviewEvent, body: string): Promise<SubmittedReview>;
   openUrl(url: string): Promise<void>;
 }
 
@@ -34,6 +44,8 @@ function tauriBackend(): Backend {
     getPr: (owner, repo, number) => call("get_pr", { owner, repo, number }),
     getFileDiff: (owner, repo, number, path) => call("get_file_diff", { owner, repo, number, path }),
     setFileViewed: (prId, path, viewed) => call("set_file_viewed", { prId, path, viewed }),
+    submitReview: (owner, repo, number, event, body) =>
+      call("submit_review", { owner, repo, number, event, body }),
     openUrl: (url) => call("open_url", { url }),
   };
 }

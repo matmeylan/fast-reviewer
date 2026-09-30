@@ -99,3 +99,14 @@ export interface FileDiff {
   oldText: string | null;
   newText: string | null;
 }
+
+/** What a submitted review does. Same values as GitHub's `event` field. */
+export type ReviewEvent = "COMMENT" | "APPROVE";
+
+export interface SubmittedReview {
+  id: number;
+  /** The review on github.com. */
+  url: string;
+  /** GitHub's review state, e.g. "COMMENTED" or "APPROVED". */
+  state: string;
+}

@@ -1,6 +1,8 @@
 // In-memory mock backend used outside Tauri (browser dev, Playwright).
 // Query flags: ?mock=unauth (start signed out), ?mock=failviewed (setFileViewed rejects),
-// ?mockViewedDelay=<ms> (setFileViewed takes that long; other calls are unaffected).
+// ?mock=failreview (submitReview rejects), ?mockViewedDelay=<ms> (setFileViewed takes
+// that long; other calls are unaffected). Submitted reviews are recorded in `reviews`
+// and, in a browser, `window.__mockReviews` (for e2e).
 import type { Backend } from "./api";
 import type {
   AuthStatus,
@@ -12,9 +14,13 @@ import type {
   PrDetail,
   PrSummary,
   RepoSummary,
+  ReviewEvent,
+  SubmittedReview,
 } from "./types";
 
 const LATENCY_MS = 30;
+/** submitReview is slower, so the UI's submitting state is visible. */
+const REVIEW_LATENCY_MS = 250;
 const CONTEXT = 3;
 
 // ---------------------------------------------------------------------------
@@ -804,6 +810,8 @@ function toDiff(spec: FileSpec): FileDiff {
 export interface MockOptions {
   authenticated?: boolean;
   failViewed?: boolean;
+  failReview?: boolean;
+  /** Latency of every call; also replaces REVIEW_LATENCY_MS when set. */
   latencyMs?: number;
   /** Latency of setFileViewed only (defaults to `latencyMs`), to simulate a slow GitHub write. */
   viewedDelayMs?: number;
@@ -817,11 +825,26 @@ function optionsFromLocation(): MockOptions {
   return {
     authenticated: !flags.includes("unauth"),
     failViewed: flags.includes("failviewed"),
+    failReview: flags.includes("failreview"),
     viewedDelayMs: Number.isFinite(delay) && delay > 0 ? delay : undefined,
   };
 }
 
-export function createMockBackend(opts: MockOptions = optionsFromLocation()): Backend {
+export interface MockReview extends SubmittedReview {
+  owner: string;
+  repo: string;
+  number: number;
+  event: ReviewEvent;
+  body: string;
+  commitId: string;
+}
+
+export interface MockBackend extends Backend {
+  /** Reviews submitted so far, oldest first. */
+  reviews: MockReview[];
+}
+
+export function createMockBackend(opts: MockOptions = optionsFromLocation()): MockBackend {
   const latency = opts.latencyMs ?? LATENCY_MS;
   // Every call gets its own timer: nothing is serialized, like concurrent Tauri commands.
   const wait = <T>(value: () => T, ms = latency): Promise<T> =>
@@ -842,6 +865,8 @@ export function createMockBackend(opts: MockOptions = optionsFromLocation()): Ba
   const loaded = new Map<string, LoadedPr>();
   const byId = new Map<string, LoadedPr>();
   const viewed = new Map<string, Set<string>>();
+  const reviews: MockReview[] = [];
+  if (typeof window !== "undefined") (window as { __mockReviews?: MockReview[] }).__mockReviews = reviews;
 
   const requireAuth = () => {
     if (!auth.authenticated) throw new Error("not authenticated");
@@ -921,6 +946,7 @@ export function createMockBackend(opts: MockOptions = optionsFromLocation()): Ba
   }
 
   return {
+    reviews,
     authStatus: () => wait(() => auth),
     setToken: (token) =>
       wait(() => {
@@ -977,6 +1003,32 @@ export function createMockBackend(opts: MockOptions = optionsFromLocation()): Ba
         if (isViewed) seen.add(path);
         else seen.delete(path);
       }, opts.viewedDelayMs ?? latency),
+    submitReview: (owner, repo, number, event, body) =>
+      wait(() => {
+        requireAuth();
+        // Same checks and messages as the Rust core / GitHub.
+        const text = body.trim();
+        if (event === "COMMENT" && !text) throw new Error("Write a comment before submitting");
+        if (opts.failReview) throw new Error("GitHub API error 502: Server Error");
+        const { detail } = load(owner, repo, number);
+        if (event === "APPROVE" && detail.author === auth.login) {
+          throw new Error("GitHub API error 422: Can not approve your own pull request");
+        }
+        const id = 1000 + reviews.length;
+        const review: MockReview = {
+          id,
+          url: `${detail.url}#pullrequestreview-${id}`,
+          state: event === "APPROVE" ? "APPROVED" : "COMMENTED",
+          owner,
+          repo,
+          number,
+          event,
+          body: text,
+          commitId: detail.headSha,
+        };
+        reviews.push(review);
+        return { id: review.id, url: review.url, state: review.state };
+      }, opts.latencyMs ?? REVIEW_LATENCY_MS),
     openUrl: (url) =>
       wait(() => {
         window.open(url, "_blank", "noopener");

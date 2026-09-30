@@ -9,13 +9,16 @@
 //!   get_pr(owner: String, repo: String, number: u64) -> PrDetail
 //!   get_file_diff(owner: String, repo: String, number: u64, path: String) -> FileDiff
 //!   set_file_viewed(prId: String, path: String, viewed: bool) -> ()
+//!   submit_review(owner: String, repo: String, number: u64, event: ReviewEvent, body: String) -> SubmittedReview
 //!   open_url(url: String) -> ()
 //! Errors are returned as `String` messages.
 //! Updates go through the updater and process plugins, called from src/lib/updater.ts.
 //! The app menu's "Check for Updates…" item emits `CHECK_UPDATES_EVENT` to the UI.
 use std::sync::Arc;
 
-use fast_reviewer_core::model::{AuthStatus, FileDiff, PrDetail, PrSummary, RepoSummary};
+use fast_reviewer_core::model::{
+    AuthStatus, FileDiff, PrDetail, PrSummary, RepoSummary, ReviewEvent, SubmittedReview,
+};
 use fast_reviewer_core::{Config, Service};
 use tauri::menu::{Menu, MenuItem};
 use tauri::{AppHandle, Emitter, Runtime, State};
@@ -84,6 +87,20 @@ async fn set_file_viewed(
 }
 
 #[tauri::command]
+async fn submit_review(
+    core: Core<'_>,
+    owner: String,
+    repo: String,
+    number: u64,
+    event: ReviewEvent,
+    body: String,
+) -> CmdResult<SubmittedReview> {
+    Ok(core
+        .submit_review(&owner, &repo, number, event, &body)
+        .await?)
+}
+
+#[tauri::command]
 async fn open_url(app: tauri::AppHandle, url: String) -> CmdResult<()> {
     if !(url.starts_with("https://") || url.starts_with("http://")) {
         return Err("Only http(s) URLs can be opened".into());
@@ -142,6 +159,7 @@ pub fn run() {
             get_pr,
             get_file_diff,
             set_file_viewed,
+            submit_review,
             open_url,
         ])
         .run(tauri::generate_context!())

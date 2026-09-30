@@ -3,7 +3,7 @@
 import { batch, createMemo, createSignal } from "solid-js";
 import { createStore, reconcile } from "solid-js/store";
 import type { Backend } from "./api";
-import type { AuthStatus, FileDiff, PrDetail, PrSummary } from "./types";
+import type { AuthStatus, FileDiff, PrDetail, PrSummary, ReviewEvent, SubmittedReview } from "./types";
 import { buildTree, filterFiles, flattenFiles, isAncestor, type DirNode } from "./tree";
 import { nextUnviewed, reduce, upcomingUnviewed, type Action, type Mode, type Overlay } from "./keys";
 import { prefetchHighlight, warmHighlighter } from "./highlight-client";
@@ -22,6 +22,11 @@ export interface DiffState {
   diff: FileDiff | null;
   loading: boolean;
   error: string | null;
+}
+
+/** The last review submitted on the open PR. */
+export interface ReviewResult extends SubmittedReview {
+  event: ReviewEvent;
 }
 
 export interface Toast {
@@ -68,6 +73,7 @@ export const errorMessage = (e: unknown): string =>
   e instanceof Error ? e.message : typeof e === "string" ? e : JSON.stringify(e);
 
 const baseName = (path: string) => path.slice(path.lastIndexOf("/") + 1);
+const prKey = (r: PrRef) => `${r.owner}/${r.repo}#${r.number}`;
 
 export type AppStore = ReturnType<typeof createAppStore>;
 
@@ -96,6 +102,11 @@ export function createAppStore(backend: Backend) {
   const [focusFindSeq, setFocusFindSeq] = createSignal(0);
   const [findStatus, setFindStatus] = createSignal<FindStatus>({ count: 0, index: -1 });
   const [toasts, setToasts] = createSignal<Toast[]>([]);
+  // Review form, for the open PR only: reset when another PR opens.
+  const [reviewDraft, setReviewDraft] = createSignal("");
+  const [reviewSubmitting, setReviewSubmitting] = createSignal(false);
+  const [reviewResult, setReviewResult] = createSignal<ReviewResult | null>(null);
+  const [reviewError, setReviewError] = createSignal<string | null>(null);
 
   const fullTree = createMemo<DirNode | null>(() => {
     const p = pr();
@@ -111,6 +122,11 @@ export function createAppStore(backend: Backend) {
     const t = tree();
     return t ? flattenFiles(t) : [];
   });
+  /** GitHub refuses to let authors approve their own PR. */
+  const ownPr = () => {
+    const login = auth()?.login;
+    return !!login && pr()?.author.toLowerCase() === login.toLowerCase();
+  };
   const pickerOpen = () => overlay() === "picker" || (phase() === "ready" && !pr() && !prLoading());
 
   // --- toasts -------------------------------------------------------------
@@ -250,6 +266,64 @@ export function createAppStore(backend: Backend) {
     });
   }
 
+  // --- review -------------------------------------------------------------
+  let reviewSeq = 0;
+
+  function resetReview() {
+    reviewSeq++;
+    batch(() => {
+      setReviewDraft("");
+      setReviewSubmitting(false);
+      setReviewResult(null);
+      setReviewError(null);
+    });
+  }
+
+  /**
+   * Submit the draft as a review of the open PR. On failure the error is kept for the
+   * form and the draft stays. A result that lands after another PR opened only toasts.
+   */
+  async function submitReview(event: ReviewEvent): Promise<boolean> {
+    const p = pr();
+    const body = reviewDraft().trim();
+    if (!p || reviewSubmitting() || (event === "COMMENT" && !body)) return false;
+    const seq = ++reviewSeq;
+    batch(() => {
+      setReviewSubmitting(true);
+      setReviewError(null);
+    });
+    const label = event === "APPROVE" ? "Approved" : "Review submitted";
+    try {
+      const r = await backend.submitReview(p.owner, p.repo, p.number, event, body);
+      if (seq !== reviewSeq) {
+        toast(`${label} on ${prKey(p)}`);
+        return false;
+      }
+      batch(() => {
+        setReviewResult({ ...r, event });
+        setReviewDraft("");
+        setReviewSubmitting(false);
+      });
+      toast(label);
+      return true;
+    } catch (e) {
+      if (seq !== reviewSeq) {
+        toast(`Couldn't submit review on ${prKey(p)}: ${errorMessage(e)}`);
+        return false;
+      }
+      batch(() => {
+        setReviewError(errorMessage(e));
+        setReviewSubmitting(false);
+      });
+      return false;
+    }
+  }
+
+  function openReview() {
+    const r = reviewResult();
+    if (r) backend.openUrl(r.url).catch((e) => toast(`Couldn't open browser: ${errorMessage(e)}`));
+  }
+
   // --- PR -----------------------------------------------------------------
   let openSeq = 0;
   async function openPr(ref: PrRef): Promise<boolean> {
@@ -273,6 +347,8 @@ export function createAppStore(backend: Backend) {
       }
       // Drop pending select() callbacks and swap timers from the previous PR.
       selectSeq++;
+      const prev = pr();
+      if (!prev || prKey(prev) !== prKey(detail)) resetReview();
       batch(() => {
         setPr(detail);
         setViewedMap(reconcile(map));
@@ -352,6 +428,7 @@ export function createAppStore(backend: Backend) {
     const status = await backend.signOut();
     selectSeq++;
     openSeq++;
+    resetReview();
     batch(() => {
       setPr(null);
       setPrLoading(null);
@@ -443,6 +520,11 @@ export function createAppStore(backend: Backend) {
     focusFindSeq,
     findStatus,
     toasts,
+    reviewDraft,
+    reviewSubmitting,
+    reviewResult,
+    reviewError,
+    ownPr,
     tree,
     order,
     // actions
@@ -465,6 +547,11 @@ export function createAppStore(backend: Backend) {
     retryDiff,
     toast,
     dismissToast,
+    setReviewDraft,
+    submitReview,
+    openReview,
+    /** Back to an empty form after a submitted review ("write another"). */
+    newReview: resetReview,
     listRepoPrs: (owner: string, repo: string) => backend.listRepoPrs(owner, repo),
     searchRepos: (q: string) => backend.searchRepos(q),
   };

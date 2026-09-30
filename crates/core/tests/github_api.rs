@@ -2,11 +2,13 @@
 use std::sync::Arc;
 
 use fast_reviewer_core::auth::AuthConfig;
-use fast_reviewer_core::model::{FileStatus, InboxReason, LineKind, ViewedState};
+use fast_reviewer_core::model::{
+    FileStatus, InboxReason, LineKind, ReviewEvent, SubmittedReview, ViewedState,
+};
 use fast_reviewer_core::{Config, Error, Service};
 use serde_json::{json, Value};
 use wiremock::matchers::{
-    body_partial_json, body_string_contains, header, method, path, query_param,
+    body_json, body_partial_json, body_string_contains, header, method, path, query_param,
 };
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -483,6 +485,104 @@ async fn viewed_mutations() {
     svc.set_file_viewed("PR_node", "src/a.ts", false)
         .await
         .unwrap();
+    server.verify().await;
+}
+
+#[tokio::test]
+async fn submit_review_pins_the_reviewed_head() {
+    let (server, svc) = setup().await;
+    mount_pr(
+        &server,
+        vec![vec![gql_file("a.ts", "MODIFIED", "VIEWED")]],
+        vec![],
+    )
+    .await;
+    for (event, id, body, state) in [
+        ("COMMENT", 1, "Looks good, one nit", "COMMENTED"),
+        ("APPROVE", 2, "", "APPROVED"),
+    ] {
+        Mock::given(method("POST"))
+            .and(path("/repos/o/r/pulls/9/reviews"))
+            .and(header("authorization", "Bearer test-token"))
+            .and(body_json(
+                json!({ "commit_id": HEAD, "body": body, "event": event }),
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "id": id,
+                "html_url": format!("https://github.com/o/r/pull/9#pullrequestreview-{id}"),
+                "state": state,
+                "commit_id": HEAD,
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+    }
+
+    // No get_pr first: the head SHA is loaded on demand. The body is trimmed.
+    let comment = svc
+        .submit_review("o", "r", 9, ReviewEvent::Comment, "  Looks good, one nit\n")
+        .await
+        .unwrap();
+    assert_eq!(
+        comment,
+        SubmittedReview {
+            id: 1,
+            url: "https://github.com/o/r/pull/9#pullrequestreview-1".into(),
+            state: "COMMENTED".into(),
+        }
+    );
+    // Approving needs no comment.
+    let approve = svc
+        .submit_review("o", "r", 9, ReviewEvent::Approve, " ")
+        .await
+        .unwrap();
+    assert_eq!((approve.id, approve.state.as_str()), (2, "APPROVED"));
+    server.verify().await;
+}
+
+#[tokio::test]
+async fn submit_review_surfaces_validation_errors() {
+    let (server, svc) = setup().await;
+    mount_pr(
+        &server,
+        vec![vec![gql_file("a.ts", "MODIFIED", "VIEWED")]],
+        vec![],
+    )
+    .await;
+    Mock::given(method("POST"))
+        .and(path("/repos/o/r/pulls/9/reviews"))
+        .respond_with(ResponseTemplate::new(422).set_body_json(json!({
+            "message": "Unprocessable Entity",
+            "errors": ["Can not approve your own pull request"],
+            "documentation_url": "https://docs.github.com/rest/pulls/reviews#create-a-review-for-a-pull-request",
+        })))
+        .mount(&server)
+        .await;
+    let err = svc
+        .submit_review("o", "r", 9, ReviewEvent::Approve, "")
+        .await
+        .unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "GitHub API error 422: Can not approve your own pull request"
+    );
+}
+
+#[tokio::test]
+async fn empty_comment_review_is_refused_locally() {
+    let (server, svc) = setup().await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(500))
+        .expect(0)
+        .mount(&server)
+        .await;
+    let before = server.received_requests().await.unwrap().len();
+    let err = svc
+        .submit_review("o", "r", 9, ReviewEvent::Comment, " \n\t")
+        .await
+        .unwrap_err();
+    assert_eq!(err.to_string(), "Write a comment before submitting");
+    assert_eq!(server.received_requests().await.unwrap().len(), before);
     server.verify().await;
 }
 

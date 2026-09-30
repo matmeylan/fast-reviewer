@@ -131,7 +131,7 @@ pnpm tauri build                 # macOS: target/release/bundle/macos/Fast Revie
 pnpm tauri build --no-bundle     # just the binary: target/release/fast-reviewer
 ```
 
-The mock backend is used automatically outside Tauri. It serves a 28-file fixture PR, a 2,400-file PR and a 3,000-line generated file. Flags: `?mock=unauth` starts signed out, `?mock=failviewed` makes viewed-sync fail, and `?mockViewedDelay=<ms>` makes viewed-sync take that long.
+The mock backend is used automatically outside Tauri. It serves a 28-file fixture PR, a 2,400-file PR and a 3,000-line generated file. Flags: `?mock=unauth` starts signed out, `?mock=failviewed` makes viewed-sync fail, `?mock=failreview` makes submitting a review fail, and `?mockViewedDelay=<ms>` makes viewed-sync take that long.
 
 ## Tests
 

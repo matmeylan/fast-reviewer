@@ -15,6 +15,7 @@ use crate::error::{Error, Result};
 use crate::github::{Content, GitHub, DEFAULT_API_URL};
 use crate::model::{
     AuthSource, AuthStatus, FileDiff, FileStatus, InboxReason, PrDetail, PrSummary, RepoSummary,
+    ReviewEvent, SubmittedReview,
 };
 
 /// Files above either limit are not diffed (`tooLarge`).
@@ -627,6 +628,30 @@ impl Service {
     pub async fn set_file_viewed(&self, pr_id: &str, path: &str, viewed: bool) -> Result<()> {
         let gen = self.ensure_auth().await?.generation;
         let res = self.gh.set_file_viewed(pr_id, path, viewed).await;
+        self.on_err(gen, res).await
+    }
+
+    /// Submit a review on the head commit `get_pr` last saw, so it is pinned to what was
+    /// reviewed even if the branch moved since. GitHub rejects a comment review without
+    /// a body (422), so that is refused here without a request.
+    pub async fn submit_review(
+        self: &Arc<Self>,
+        owner: &str,
+        repo: &str,
+        number: u64,
+        event: ReviewEvent,
+        body: &str,
+    ) -> Result<SubmittedReview> {
+        let body = body.trim();
+        if event == ReviewEvent::Comment && body.is_empty() {
+            return Err(Error::Other("Write a comment before submitting".into()));
+        }
+        let gen = self.ensure_auth().await?.generation;
+        let info = self.pr_info(owner, repo, number).await?;
+        let res = self
+            .gh
+            .submit_review(owner, repo, number, &info.head_sha, event, body)
+            .await;
         self.on_err(gen, res).await
     }
 

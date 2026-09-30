@@ -115,6 +115,14 @@ fn structs_serialize_like_fixture() {
     assert_eq!(to_json(&pr_summary), f["prSummary"]);
     assert_eq!(to_json(&pr_detail), f["prDetail"]);
     assert_eq!(to_json(&file_diff), f["fileDiff"]);
+    assert_eq!(
+        to_json(&SubmittedReview {
+            id: 80,
+            url: "https://github.com/octo/app/pull/42#pullrequestreview-80".into(),
+            state: "APPROVED".into(),
+        }),
+        f["submittedReview"]
+    );
 
     // And the fixture deserializes back into the same values.
     assert_eq!(
@@ -134,6 +142,7 @@ fn enums_serialize_like_fixture() {
     use FileStatus as F;
     use InboxReason as I;
     use LineKind as L;
+    use ReviewEvent as R;
     use ViewedState as V;
     assert_eq!(to_json(&[A::Env, A::GhCli, A::Keychain]), e["authSource"]);
     assert_eq!(
@@ -156,5 +165,11 @@ fn enums_serialize_like_fixture() {
         e["viewedState"]
     );
     assert_eq!(to_json(&[L::Context, L::Add, L::Del]), e["lineKind"]);
+    assert_eq!(to_json(&[R::Comment, R::Approve]), e["reviewEvent"]);
+    assert_eq!(
+        serde_json::from_value::<ReviewEvent>(json!("APPROVE")).unwrap(),
+        R::Approve,
+        "submit_review takes the event as the UI sends it"
+    );
     assert_eq!(to_json(&()), json!(null), "set_file_viewed returns null");
 }
