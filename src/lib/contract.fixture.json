@@ -76,6 +76,7 @@
     "fileStatus": ["added", "removed", "modified", "renamed", "copied", "changed"],
     "viewedState": ["VIEWED", "UNVIEWED", "DISMISSED"],
     "lineKind": ["context", "add", "del"],
-    "reviewEvent": ["COMMENT", "APPROVE"]
+    "reviewEvent": ["COMMENT", "APPROVE"],
+    "side": ["old", "new"]
   }
 }

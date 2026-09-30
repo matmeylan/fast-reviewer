@@ -3,7 +3,7 @@
 import { batch, createMemo, createSignal } from "solid-js";
 import { createStore, reconcile } from "solid-js/store";
 import type { Backend } from "./api";
-import type { AuthStatus, FileDiff, PrDetail, PrSummary, ReviewEvent, SubmittedReview } from "./types";
+import type { AuthStatus, FileDiff, PrDetail, PrSummary, ReviewEvent, Side, SubmittedReview } from "./types";
 import { buildTree, filterFiles, flattenFiles, isAncestor, type DirNode } from "./tree";
 import { nextUnviewed, reduce, upcomingUnviewed, type Action, type Mode, type Overlay } from "./keys";
 import { prefetchHighlight, warmHighlighter } from "./highlight-client";
@@ -494,6 +494,24 @@ export function createAppStore(backend: Backend) {
     if (path) select(path);
   }
 
+  /** Raw bytes of one side of a file in the open PR (image diffs). */
+  function fileContent(path: string, side: Side): Promise<Uint8Array<ArrayBuffer>> {
+    const p = pr();
+    if (!p) return Promise.reject(new Error("No pull request open"));
+    return backend.getFileContent(p.owner, p.repo, p.number, path, side);
+  }
+
+  /** Open one side of a file in its default app. Never rejects: failures become a toast. */
+  async function openFile(path: string, side: Side): Promise<void> {
+    const p = pr();
+    if (!p) return;
+    try {
+      await backend.openFile(p.owner, p.repo, p.number, path, side);
+    } catch (e) {
+      toast(`Couldn't open ${baseName(path)}: ${errorMessage(e)}`);
+    }
+  }
+
   return {
     // state
     phase,
@@ -545,6 +563,8 @@ export function createAppStore(backend: Backend) {
     setFindStatus,
     toggleCollapsed: (dir: string) => setCollapsed(dir, (c) => !c),
     retryDiff,
+    fileContent,
+    openFile,
     toast,
     dismissToast,
     setReviewDraft,

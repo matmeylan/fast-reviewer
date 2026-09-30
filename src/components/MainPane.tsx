@@ -1,13 +1,19 @@
-import { Match, Show, Switch } from "solid-js";
+import { createSignal, Match, Show, Switch } from "solid-js";
 import logoUrl from "../../assets/logo.svg";
 import type { AppStore } from "../lib/store";
+import { isImage, isSvg } from "../lib/media";
+import type { FileDiff, Side } from "../lib/types";
 import DiffView from "./DiffView";
 import FindBar from "./FindBar";
+import ImageDiff from "./ImageDiff";
+import { OpenFileActions } from "./OpenFile";
 import { Counts } from "./FileTree";
 import ReviewForm from "./ReviewForm";
 import CircleCheckBig from "lucide-solid/icons/circle-check-big";
+import CodeXml from "lucide-solid/icons/code-xml";
 import Columns2 from "lucide-solid/icons/columns-2";
 import FileCode from "lucide-solid/icons/file-code";
+import ImageIcon from "lucide-solid/icons/image";
 import MessageSquare from "lucide-solid/icons/message-square";
 import Rows2 from "lucide-solid/icons/rows-2";
 import TriangleAlert from "lucide-solid/icons/triangle-alert";
@@ -39,6 +45,10 @@ export default function MainPane(props: { store: AppStore }) {
     const f = file();
     return f ? !!s.viewed[f.path] : false;
   };
+  const statusOf = (path: string) => s.pr()?.files.find((x) => x.path === path)?.status ?? "modified";
+  /** SVG whose source diff is shown instead of the image (SVGs open as images). */
+  const [svgSource, setSvgSource] = createSignal<string | null>(null);
+  const showImage = (d: FileDiff) => isImage(d.path) && svgSource() !== d.path;
 
   return (
     <main class="main flex min-w-0 flex-1 flex-col">
@@ -71,6 +81,18 @@ export default function MainPane(props: { store: AppStore }) {
                 Viewed
               </label>
               <span class="flex-1" />
+              <Show when={isSvg(f().path)}>
+                <div class={SEGMENTS} role="group" aria-label="SVG view" data-testid="svg-toggle">
+                  <button classList={{ on: svgSource() !== f().path }} onClick={() => setSvgSource(null)}>
+                    <ImageIcon />
+                    Image
+                  </button>
+                  <button classList={{ on: svgSource() === f().path }} onClick={() => setSvgSource(f().path)}>
+                    <CodeXml />
+                    Source
+                  </button>
+                </div>
+              </Show>
             </>
           )}
         </Show>
@@ -170,17 +192,34 @@ export default function MainPane(props: { store: AppStore }) {
             </div>
           </Match>
           <Match when={s.diff().diff}>
-            {(d) => (
-              <DiffView
-                diff={d()}
-                mode={s.mode()}
-                hunkNav={s.hunkNav()}
-                stats={d().tooLarge ? statsFor(d().path) : undefined}
-                find={s.findOpen() ? { query: s.findQuery(), caseSensitive: s.findCase() } : undefined}
-                findNav={s.findNav()}
-                onFindStatus={s.setFindStatus}
-              />
-            )}
+            {(d) => {
+              const open = (side: Side) => s.openFile(d().path, side);
+              return (
+                <Show
+                  when={showImage(d())}
+                  fallback={
+                    <DiffView
+                      diff={d()}
+                      mode={s.mode()}
+                      hunkNav={s.hunkNav()}
+                      stats={d().tooLarge ? statsFor(d().path) : undefined}
+                      actions={<OpenFileActions status={statusOf(d().path)} onOpen={open} />}
+                      find={s.findOpen() ? { query: s.findQuery(), caseSensitive: s.findCase() } : undefined}
+                      findNav={s.findNav()}
+                      onFindStatus={s.setFindStatus}
+                    />
+                  }
+                >
+                  <ImageDiff
+                    path={d().path}
+                    status={statusOf(d().path)}
+                    mode={s.mode()}
+                    load={(side) => s.fileContent(d().path, side)}
+                    onOpen={open}
+                  />
+                </Show>
+              );
+            }}
           </Match>
           <Match when={s.pr() && s.pr()!.files.length === 0}>
             <Empty class="h-full">

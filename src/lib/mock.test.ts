@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeHunks, createMockBackend, intraLine, myers } from "./mock";
+import { computeHunks, createMockBackend, intraLine, mockOpenedFiles, myers } from "./mock";
 
 describe("mock diff helper", () => {
   it("myers produces a minimal edit script", () => {
@@ -71,6 +71,41 @@ describe("mock backend", () => {
     expect(b.reviews).toEqual([expect.objectContaining({ id: r.id, number: 482, event: "APPROVE", body: "Nice" })]);
     const failing = createMockBackend({ latencyMs: 0, failReview: true });
     await expect(failing.submitReview("acme", "web", 482, "APPROVE", "")).rejects.toThrow("502");
+  });
+
+  it("serves image, SVG and PDF contents consistent with their diffs", async () => {
+    const text = (b: Uint8Array) => new TextDecoder().decode(b);
+    const [png, svg, pdf] = await Promise.all(
+      ["web/assets/logo.png", "web/assets/icon.svg", "docs/guide.pdf"].map((p) => backend.getFileDiff("acme", "web", 482, p)),
+    );
+    // Like Rust: PNG and PDF are binary, SVG is a text (XML) diff.
+    expect([png.binary, pdf.binary, svg.binary]).toEqual([true, true, false]);
+    expect(svg.language).toBe("xml");
+    expect(svg.hunks.length).toBeGreaterThan(0);
+
+    const oldPng = await backend.getFileContent("acme", "web", 482, "web/assets/logo.png", "old");
+    const newPng = await backend.getFileContent("acme", "web", 482, "web/assets/logo.png", "new");
+    for (const b of [oldPng, newPng]) expect(text(b.slice(1, 4))).toBe("PNG");
+    expect(newPng).not.toEqual(oldPng);
+    const newSvg = await backend.getFileContent("acme", "web", 482, "web/assets/icon.svg", "new");
+    expect(text(newSvg)).toBe(svg.newText);
+
+    const doc = text(await backend.getFileContent("acme", "web", 482, "docs/guide.pdf", "new"));
+    expect(doc.startsWith("%PDF-1.4\n")).toBe(true);
+    const xref = Number(/startxref\n(\d+)/.exec(doc)![1]);
+    expect(doc.slice(xref).startsWith("xref\n")).toBe(true);
+    // Added: no old version.
+    await expect(backend.getFileContent("acme", "web", 482, "docs/guide.pdf", "old")).rejects.toThrow(/Not found/);
+  });
+
+  it("records opened files", async () => {
+    const before = mockOpenedFiles().length;
+    await backend.openFile("acme", "web", 482, "docs/guide.pdf", "new");
+    expect(mockOpenedFiles().slice(before)).toEqual([
+      { owner: "acme", repo: "web", number: 482, path: "docs/guide.pdf", side: "new" },
+    ]);
+    await expect(backend.openFile("acme", "web", 482, "api/legacy_auth.py", "new")).rejects.toThrow();
+    expect(mockOpenedFiles()).toHaveLength(before + 1);
   });
 
   it("a slow setFileViewed does not delay getFileDiff (no shared queue)", async () => {

@@ -210,6 +210,11 @@
   background: var(--ring);
 }
 
+/* Behind images in image diffs, so transparent pixels show. */
+@utility checkerboard {
+  background: repeating-conic-gradient(color-mix(in oklab, var(--muted-foreground) 16%, var(--background)) 0 25%, var(--background) 0 50%) 0 0 / 16px 16px;
+}
+
 /* Spinners only show when a load is genuinely slow. */
 .spinner {
   opacity: 0;
