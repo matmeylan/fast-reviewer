@@ -12,6 +12,7 @@ import type {
   PrDetail,
   PrSummary,
   RepoSummary,
+  Side,
 } from "./types";
 
 const LATENCY_MS = 30;
@@ -172,6 +173,9 @@ interface FileSpec {
   oldText: string | null;
   newText: string | null;
   binary?: boolean;
+  /** Contents of binary files (text files are served as their UTF-8 text). */
+  oldBytes?: Uint8Array<ArrayBuffer>;
+  newBytes?: Uint8Array<ArrayBuffer>;
 }
 
 const LANGS: Record<string, string> = {
@@ -184,6 +188,7 @@ const LANGS: Record<string, string> = {
   md: "markdown",
   json: "json",
   sql: "sql",
+  svg: "xml",
 };
 
 function languageOf(path: string): string | null {
@@ -570,6 +575,51 @@ The API lives in \`api/\` and runs with \`uvicorn api.server:app --reload\`.
 Run \`pnpm test\` and \`pytest\` before pushing.
 `;
 
+const fromBase64 = (b64: string): Uint8Array<ArrayBuffer> => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+
+// A blue 64×64 badge replaced by an orange 96×64 one, both with transparent corners.
+const LOGO_OLD_PNG = fromBase64(
+  "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAAy0lEQVR42u3b0Q2DMAwFwCzTyTp+h2hXoMV2nPqexD/vQCCIs5aISFEez9f7yjGu8F+BRJU+DiO7eGuI6vJtEHYVbwHRpfwWhG7lSxG6li9B6F4+FeGU8ikIp5UPR4g6oatpBRB5RaoBbiNE35I7AG4hjAbIeCjtAvgJAcBkgKz38k6ArxAAABgMkFUqK+EIAAAAAAAAAAAAYwF8CwAAAMA/QQAALIwAsDhqedyAhBEZQ1LG5AxKGpU1LG1c3oYJW2ZsmqoFWSIiRfkAqS3dbwuFRSsAAAAASUVORK5CYII=",
+);
+const LOGO_NEW_PNG = fromBase64(
+  "iVBORw0KGgoAAAANSUhEUgAAAGAAAABACAYAAADlNHIOAAAA60lEQVR42u3cwQ3CMBREwRRAgfR/pAk4cgWEtevvsbQNvAkSCQrX9eN53G9Pe+9aeQQOoYgYhBAuiCBYEEGoIIJAQQRhwgiiBAEECSOIAQCAATgTQIgwgggAABgAAAbgq316AIg/C2BK+O0AJl312wFMjb8FwOT49QDT41cDTA9fC3DCVV8LcFr8KoAT49cAnBq/AuDU8D4BACD4FgQAgjthAJ4FeRoK4H8IK45fxBaFBbAJBIAwAoAwAgAP4wwAAAPgPTHzliQAAwDA/GPKpPgACgAghONDKIgPoSA+hIL4EArigygID2V97Be5GG5wKcNHcQAAAABJRU5ErkJggg==",
+);
+
+const ICON_SVG_OLD = `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <circle cx="32" cy="32" r="28" fill="#2563eb"/>
+  <path d="M32 18v28M18 32h28" stroke="#fff" stroke-width="8" stroke-linecap="round"/>
+</svg>
+`;
+
+const ICON_SVG_NEW = `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <rect x="4" y="4" width="56" height="56" rx="14" fill="#ea580c"/>
+  <path d="M24 20l14 12-14 12" fill="none" stroke="#fff" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
+`;
+
+/** A one-page PDF showing `text`. */
+function pdfFile(text: string): Uint8Array<ArrayBuffer> {
+  const content = `BT /F1 24 Tf 72 720 Td (${text}) Tj ET`;
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
+    `<< /Length ${content.length} >>\nstream\n${content}\nendstream`,
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+  ];
+  let out = "%PDF-1.4\n";
+  const offsets = objects.map((o, i) => {
+    const at = out.length;
+    out += `${i + 1} 0 obj\n${o}\nendobj\n`;
+    return at;
+  });
+  const xref = out.length;
+  out += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  out += offsets.map((o) => `${String(o).padStart(10, "0")} 00000 n \n`).join("");
+  out += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return new TextEncoder().encode(out);
+}
+
 const BUTTON_OLD = `import type { JSX } from "solid-js";
 
 export interface ButtonProps {
@@ -662,6 +712,7 @@ function mainPrFiles(): FileSpec[] {
     { path: "api/legacy_auth.py", status: "removed", oldText: legacy, newText: null },
     { path: "docs/step10-deploy.md", status: "added", oldText: null, newText: "# Step 10: Deploy\n\nPush to main.\n" },
     { path: "docs/step2-setup.md", status: "added", oldText: null, newText: "# Step 2: Setup\n\nInstall deps.\n" },
+    { path: "docs/guide.pdf", status: "added", oldText: null, newText: null, binary: true, newBytes: pdfFile("Acme deployment guide") },
     modified("package.json", `{\n  "name": "acme-web",\n  "version": "1.3.0",\n  "scripts": {\n    "dev": "vite",\n    "test": "vitest"\n  }\n}\n`, `{\n  "name": "acme-web",\n  "version": "1.4.0",\n  "scripts": {\n    "dev": "vite",\n    "test": "vitest run",\n    "lint": "eslint ."\n  }\n}\n`),
     modified("packages/shared/src/index.ts", tsModule("Shared")),
     modified("src/components/Button.tsx", BUTTON_OLD, BUTTON_NEW),
@@ -678,7 +729,8 @@ function mainPrFiles(): FileSpec[] {
     modified("src/lib/utils/debounce.ts", tsModule("Debounce")),
     modified("src/lib/utils/strings.ts", tsModule("Strings")),
     { path: "tests/test_orders.py", status: "added", oldText: null, newText: pyModule("test_orders") },
-    { path: "web/assets/logo.png", status: "modified", oldText: null, newText: null, binary: true },
+    modified("web/assets/icon.svg", ICON_SVG_OLD, ICON_SVG_NEW),
+    { path: "web/assets/logo.png", status: "modified", oldText: null, newText: null, binary: true, oldBytes: LOGO_OLD_PNG, newBytes: LOGO_NEW_PNG },
     modified("web/index.html", HTML_OLD, HTML_NEW),
     modified("web/styles.css", cssFile(), CSS_NEW),
   ];
@@ -799,6 +851,28 @@ function toDiff(spec: FileSpec): FileDiff {
     oldText,
     newText,
   };
+}
+
+/** One side of a fixture file, or a NotFound-like error when the file has no such side. */
+function sideBytes(spec: FileSpec | undefined, path: string, side: Side): Uint8Array<ArrayBuffer> {
+  const text = side === "old" ? spec?.oldText : spec?.newText;
+  const bytes = (side === "old" ? spec?.oldBytes : spec?.newBytes) ?? (text == null ? null : new TextEncoder().encode(text));
+  if (!bytes) throw new Error(`Not found on GitHub: ${side} version of ${path}`);
+  return bytes;
+}
+
+export interface OpenedFile {
+  owner: string;
+  repo: string;
+  number: number;
+  path: string;
+  side: Side;
+}
+
+/** Files the mock's `openFile` "opened", oldest first. Also `window.__mockOpenedFiles`, for e2e. */
+export function mockOpenedFiles(): OpenedFile[] {
+  const g = globalThis as { __mockOpenedFiles?: OpenedFile[] };
+  return (g.__mockOpenedFiles ??= []);
 }
 
 export interface MockOptions {
@@ -965,6 +1039,17 @@ export function createMockBackend(opts: MockOptions = optionsFromLocation()): Ba
         const d = load(owner, repo, number).diffs.get(path);
         if (!d) throw new Error(`No such file in PR: ${path}`);
         return d;
+      }),
+    getFileContent: (owner, repo, number, path, side) =>
+      wait(() => {
+        requireAuth();
+        return sideBytes(load(owner, repo, number).specs.get(path), path, side);
+      }),
+    openFile: (owner, repo, number, path, side) =>
+      wait(() => {
+        requireAuth();
+        sideBytes(load(owner, repo, number).specs.get(path), path, side);
+        mockOpenedFiles().push({ owner, repo, number, path, side });
       }),
     setFileViewed: (prId, path, isViewed) =>
       wait(() => {

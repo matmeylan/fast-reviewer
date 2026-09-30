@@ -2,7 +2,7 @@
 // <DiffView diff mode hunkNav find findNav onFindStatus /> renders one file's
 // diff, virtualized, with syntax highlighting swapped in from the highlight
 // worker when ready, find-in-file matches highlighted, and selectable code.
-import { createEffect, createMemo, createSignal, For, Match, on, onCleanup, onMount, Show, Switch, untrack } from "solid-js";
+import { createEffect, createMemo, createSignal, For, Match, on, onCleanup, onMount, Show, Switch, untrack, type JSX } from "solid-js";
 import type { DiffLine, FileDiff } from "../lib/types";
 import type { ThemeName } from "../lib/highlight-protocol";
 import { renderLineHtml, paletteCss, type LineHits } from "../lib/highlight-merge";
@@ -34,6 +34,8 @@ export interface DiffViewProps {
   theme?: ThemeName;
   /** Line stats, shown for files too large to display. */
   stats?: { additions: number; deletions: number };
+  /** Shown under the binary / too-large message (e.g. buttons to open the file elsewhere). */
+  actions?: JSX.Element;
   /** Text to find in the file; matches are highlighted. Omit while the find bar is closed. */
   find?: FindOptions;
   /** Incremented by the shell to step to the next (+1) / previous (-1) find match. */
@@ -62,7 +64,10 @@ export default function DiffView(props: DiffViewProps) {
   return (
     <Switch fallback={<DiffBody {...props} />}>
       <Match when={props.diff.binary}>
-        <div class="diff-view diff-empty" data-theme={props.theme ?? colorScheme()} data-path={props.diff.path}>Binary file not shown</div>
+        <div class="diff-view diff-empty" data-theme={props.theme ?? colorScheme()} data-path={props.diff.path}>
+          Binary file not shown
+          {props.actions}
+        </div>
       </Match>
       <Match when={props.diff.tooLarge}>
         <div class="diff-view diff-empty" data-theme={props.theme ?? colorScheme()} data-path={props.diff.path}>
@@ -74,6 +79,7 @@ export default function DiffView(props: DiffViewProps) {
               </span>
             )}
           </Show>
+          {props.actions}
         </div>
       </Match>
       <Match when={props.diff.hunks.length === 0}>

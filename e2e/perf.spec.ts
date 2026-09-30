@@ -11,7 +11,7 @@ async function openMainPr(page: Page, query = "") {
   await expect(page.getByTestId("picker-item").first()).toContainText("Refactor data table");
   await page.keyboard.press("Enter");
   await expect(page.getByTestId("picker")).toBeHidden();
-  await expect(page.getByTestId("tree-file")).toHaveCount(28);
+  await expect(page.getByTestId("tree-file")).toHaveCount(30);
 }
 
 /** Run `act`, then return ms until each of `conds` (evaluated in the page, in order) holds. */
@@ -64,7 +64,7 @@ test("r advances instantly even when GitHub takes 2s to mark the file viewed", a
   expect(shown).toBeLessThan(NEVER_WAITS);
   // The checkmark and counter are applied at once, not when the (slow) write resolves.
   expect(ticked).toBeLessThan(NEVER_WAITS);
-  await expect(page.getByTestId("progress")).toContainText("3/28 viewed", { timeout: NEVER_WAITS });
+  await expect(page.getByTestId("progress")).toContainText("3/30 viewed", { timeout: NEVER_WAITS });
 
   // Keep going while the first write is still pending.
   for (const path of ["api/__init__.py", "api/legacy_auth.py", "api/models.py"]) {
@@ -72,10 +72,10 @@ test("r advances instantly even when GitHub takes 2s to mark the file viewed", a
     expect(t).toBeLessThan(NEVER_WAITS);
   }
   expect(await selectedPath(page)).toBe("api/models.py");
-  await expect(page.getByTestId("progress")).toContainText("6/28 viewed", { timeout: NEVER_WAITS });
+  await expect(page.getByTestId("progress")).toContainText("6/30 viewed", { timeout: NEVER_WAITS });
   // Once the writes land nothing is rolled back.
   await page.waitForTimeout(2200);
-  await expect(page.getByTestId("progress")).toContainText("6/28 viewed");
+  await expect(page.getByTestId("progress")).toContainText("6/30 viewed");
   await expect(page.getByTestId("toast")).toHaveCount(0);
 });
 

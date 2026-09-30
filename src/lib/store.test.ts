@@ -125,7 +125,7 @@ describe("app store", () => {
     const { store, dispose } = setup();
     await openMain(store);
     store.setFilter("web/");
-    expect(store.order()).toEqual(["web/assets/logo.png", "web/index.html", "web/styles.css"]);
+    expect(store.order()).toEqual(["web/assets/icon.svg", "web/assets/logo.png", "web/index.html", "web/styles.css"]);
     dispose();
   });
 
@@ -377,6 +377,23 @@ describe("diff cache", () => {
     expect(calls(first)).toBe(2);
     await tick();
     expect(store.diff().diff?.path).toBe(first);
+    dispose();
+  });
+
+  it("reads and opens files of the current PR; a failed open becomes a toast", async () => {
+    const backend = createMockBackend({ latencyMs: 0 });
+    const open = vi.spyOn(backend, "openFile");
+    const { store, dispose } = setup(backend);
+    await openMain(store);
+    const png = await store.fileContent("web/assets/logo.png", "new");
+    expect([...png.slice(1, 4)].map((c) => String.fromCharCode(c)).join("")).toBe("PNG");
+    await store.openFile("docs/guide.pdf", "new");
+    expect(open).toHaveBeenCalledWith("acme", "web", 482, "docs/guide.pdf", "new");
+    expect(store.toasts()).toHaveLength(0);
+    // An added file has no old version.
+    await store.openFile("docs/guide.pdf", "old");
+    expect(store.toasts()).toHaveLength(1);
+    expect(store.toasts()[0].text).toMatch(/^Couldn't open guide\.pdf: Not found/);
     dispose();
   });
 });
