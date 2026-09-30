@@ -89,6 +89,8 @@ export function createAppStore(backend: Backend) {
   const [selected, setSelected] = createSignal<string | null>(null);
   const [done, setDone] = createSignal(false);
   const [mode, setModeSignal] = createSignal<Mode>(storage.get(KEY_MODE) === "unified" ? "unified" : "split");
+  /** The file the user picked a mode on by hand, overriding the added-file default there. */
+  const [modePinned, setModePinned] = createSignal<string | null>(null);
   const [overlay, setOverlay] = createSignal<Overlay>("none");
   const [filter, setFilter] = createSignal("");
   const [diff, setDiff] = createSignal<DiffState>({ path: null, diff: null, loading: false, error: null });
@@ -122,6 +124,13 @@ export function createAppStore(backend: Backend) {
     const t = tree();
     return t ? flattenFiles(t) : [];
   });
+  /** The shown file is new: split view would leave the old side empty. */
+  const shownAdded = createMemo(() => {
+    const path = diff().path;
+    return !!path && pr()?.files.find((f) => f.path === path)?.status === "added";
+  });
+  /** The mode the diff is shown in: `mode` (the user's preference), but unified for an added file. */
+  const viewMode = (): Mode => (shownAdded() && modePinned() !== diff().path ? "unified" : mode());
   /** GitHub refuses to let authors approve their own PR. */
   const ownPr = () => {
     const login = auth()?.login;
@@ -441,8 +450,13 @@ export function createAppStore(backend: Backend) {
   }
 
   // --- actions --------------------------------------------------------------
+  /** Show `m` and keep it as the preference; picking the mode already shown changes nothing. */
   function setMode(m: Mode) {
-    setModeSignal(m);
+    if (m === viewMode()) return;
+    batch(() => {
+      setModePinned(diff().path);
+      setModeSignal(m);
+    });
     storage.set(KEY_MODE, m);
   }
 
@@ -456,7 +470,7 @@ export function createAppStore(backend: Backend) {
         order: order(),
         current: selected(),
         isViewed: (x) => !!viewed[x],
-        mode: mode(),
+        mode: viewMode(),
         overlay: pickerOpen() ? "picker" : overlay(),
         done: done(),
         findOpen: findOpen(),
@@ -525,6 +539,7 @@ export function createAppStore(backend: Backend) {
     selected,
     done,
     mode,
+    viewMode,
     overlay,
     pickerOpen,
     filter,

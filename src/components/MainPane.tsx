@@ -117,12 +117,12 @@ export default function MainPane(props: { store: AppStore }) {
           aria-label="Diff mode"
           data-testid="mode-toggle"
         >
-          <button classList={{ on: s.mode() === "split" }} onClick={() => s.setMode("split")} title="Split (v)">
+          <button classList={{ on: s.viewMode() === "split" }} onClick={() => s.setMode("split")} title="Split (v)">
             <Columns2 />
             Split
           </button>
           <button
-            classList={{ on: s.mode() === "unified" }}
+            classList={{ on: s.viewMode() === "unified" }}
             onClick={() => s.setMode("unified")}
             title="Unified (v)"
           >
@@ -200,7 +200,7 @@ export default function MainPane(props: { store: AppStore }) {
                   fallback={
                     <DiffView
                       diff={d()}
-                      mode={s.mode()}
+                      mode={s.viewMode()}
                       hunkNav={s.hunkNav()}
                       stats={d().tooLarge ? statsFor(d().path) : undefined}
                       actions={<OpenFileActions status={statusOf(d().path)} onOpen={open} />}
@@ -213,7 +213,7 @@ export default function MainPane(props: { store: AppStore }) {
                   <ImageDiff
                     path={d().path}
                     status={statusOf(d().path)}
-                    mode={s.mode()}
+                    mode={s.viewMode()}
                     load={(side) => s.fileContent(d().path, side)}
                     onOpen={open}
                   />
