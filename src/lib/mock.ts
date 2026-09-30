@@ -985,6 +985,7 @@ export function createMockBackend(opts: MockOptions = optionsFromLocation()): Mo
       title: fx.summary.title,
       author: fx.summary.author,
       url: fx.summary.url,
+      state: fx.summary.isDraft ? "draft" : "open",
       baseRef: fx.baseRef,
       headRef: fx.headRef,
       baseSha: hash(key + "base").toString(16).padStart(8, "0"),

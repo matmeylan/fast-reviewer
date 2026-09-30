@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use fast_reviewer_core::auth::AuthConfig;
-use fast_reviewer_core::model::FileStatus;
+use fast_reviewer_core::model::{FileStatus, PrState};
 use fast_reviewer_core::service::MAX_DIFF_BYTES;
 use fast_reviewer_core::{Config, Error, Service};
 use serde_json::{json, Value};
@@ -102,6 +102,33 @@ impl Respond for RestPages {
         ResponseTemplate::new(200)
             .set_body_json(Value::Array(files))
             .set_delay(self.delay)
+    }
+}
+
+#[tokio::test]
+async fn graphql_state_maps_to_pr_state() {
+    for (state, draft, want) in [
+        (None, false, PrState::Open),
+        (Some("OPEN"), false, PrState::Open),
+        (Some("OPEN"), true, PrState::Draft),
+        (Some("MERGED"), false, PrState::Merged),
+        (Some("CLOSED"), true, PrState::Closed),
+    ] {
+        let (server, svc) = setup().await;
+        let mut page = pr_page(HEAD, vec![gql_file("a.ts", "MODIFIED")], 1, None);
+        let pr = &mut page["data"]["repository"]["pullRequest"];
+        if let Some(s) = state {
+            pr["state"] = json!(s);
+        }
+        pr["isDraft"] = json!(draft);
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(page))
+            .mount(&server)
+            .await;
+        mount_merge_base(&server, HEAD).await;
+        let pr = svc.get_pr("o", "r", 9).await.unwrap();
+        assert_eq!(pr.state, want, "{state:?} draft={draft}");
     }
 }
 

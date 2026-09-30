@@ -39,6 +39,7 @@ fn structs_serialize_like_fixture() {
         title: "Speed up the thing".into(),
         author: "hubot".into(),
         url: "https://github.com/octo/app/pull/42".into(),
+        state: PrState::Merged,
         base_ref: "main".into(),
         head_ref: "fast".into(),
         base_sha: "aaaaaaa".into(),
@@ -142,6 +143,7 @@ fn enums_serialize_like_fixture() {
     use FileStatus as F;
     use InboxReason as I;
     use LineKind as L;
+    use PrState as P;
     use ReviewEvent as R;
     use Side as S;
     use ViewedState as V;
@@ -160,6 +162,10 @@ fn enums_serialize_like_fixture() {
             F::Changed
         ]),
         e["fileStatus"]
+    );
+    assert_eq!(
+        to_json(&[P::Open, P::Draft, P::Merged, P::Closed]),
+        e["prState"]
     );
     assert_eq!(
         to_json(&[V::Viewed, V::Unviewed, V::Dismissed]),

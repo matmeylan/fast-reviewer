@@ -445,6 +445,7 @@ impl Service {
             });
         }
 
+        let state = pr.pr_state();
         Ok(PrDetail {
             id: pr.id,
             owner: owner.to_owned(),
@@ -453,6 +454,7 @@ impl Service {
             title: pr.title,
             author: pr.author.map(|a| a.login).unwrap_or_else(|| "ghost".into()),
             url: pr.url,
+            state,
             base_ref: pr.base_ref_name,
             head_ref: pr.head_ref_name,
             base_sha: pr.base_ref_oid,

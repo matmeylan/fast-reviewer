@@ -10,8 +10,8 @@ use serde_json::{json, Value};
 
 use crate::error::{Error, Result};
 use crate::model::{
-    ChangedFile, FileStatus, InboxReason, PrSummary, RepoSummary, ReviewEvent, SubmittedReview,
-    ViewedState,
+    ChangedFile, FileStatus, InboxReason, PrState, PrSummary, RepoSummary, ReviewEvent,
+    SubmittedReview, ViewedState,
 };
 
 pub const DEFAULT_API_URL: &str = "https://api.github.com";
@@ -284,6 +284,15 @@ impl GitHub {
             id: p.node_id,
             title: p.title,
             url: p.html_url,
+            state: if p.merged {
+                "MERGED"
+            } else if p.state == "closed" {
+                "CLOSED"
+            } else {
+                "OPEN"
+            }
+            .into(),
+            is_draft: p.draft,
             author: p.user,
             base_ref_name: p.base.git_ref,
             head_ref_name: p.head.git_ref,
@@ -536,7 +545,7 @@ fn enc_path(path: &str) -> String {
 const PR_QUERY: &str = r#"query($owner: String!, $repo: String!, $number: Int!, $after: String) {
   repository(owner: $owner, name: $repo) {
     pullRequest(number: $number) {
-      id title url
+      id title url state isDraft
       author { login }
       baseRefName headRefName baseRefOid headRefOid changedFiles
       files(first: 100, after: $after) {
@@ -595,6 +604,11 @@ pub struct GqlPr {
     pub id: String,
     pub title: String,
     pub url: String,
+    /// GitHub's `OPEN`, `CLOSED` or `MERGED`; see [`GqlPr::pr_state`].
+    #[serde(default)]
+    pub state: String,
+    #[serde(default)]
+    pub is_draft: bool,
     pub author: Option<Login>,
     pub base_ref_name: String,
     pub head_ref_name: String,
@@ -608,6 +622,17 @@ pub struct GqlPr {
     /// The file listing stopped at the page cap while GitHub still reported more.
     #[serde(skip)]
     pub truncated: bool,
+}
+
+impl GqlPr {
+    pub fn pr_state(&self) -> PrState {
+        match self.state.as_str() {
+            "MERGED" => PrState::Merged,
+            "CLOSED" => PrState::Closed,
+            _ if self.is_draft => PrState::Draft,
+            _ => PrState::Open,
+        }
+    }
 }
 
 #[derive(Default, Deserialize)]
@@ -773,6 +798,13 @@ struct RestPull {
     node_id: String,
     title: String,
     html_url: String,
+    /// `open` or `closed`; a merged PR is `closed` with `merged` set.
+    #[serde(default)]
+    state: String,
+    #[serde(default)]
+    merged: bool,
+    #[serde(default)]
+    draft: bool,
     user: Option<Login>,
     #[serde(default)]
     changed_files: Option<u32>,

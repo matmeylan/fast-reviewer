@@ -88,6 +88,16 @@ pub struct ChangedFile {
     pub viewed: ViewedState,
 }
 
+/// Where a PR stands: GitHub's open/closed/merged, with draft split out of open.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PrState {
+    Open,
+    Draft,
+    Merged,
+    Closed,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PrDetail {
@@ -98,6 +108,7 @@ pub struct PrDetail {
     pub title: String,
     pub author: String,
     pub url: String,
+    pub state: PrState,
     pub base_ref: String,
     pub head_ref: String,
     pub base_sha: String,

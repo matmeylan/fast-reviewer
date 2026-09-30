@@ -30,6 +30,9 @@ export interface PrSummary {
   reason: "reviewRequested" | "authored" | "other";
 }
 
+/** Where a PR stands: GitHub's open/closed/merged, with draft split out of open. */
+export type PrState = "open" | "draft" | "merged" | "closed";
+
 export type FileStatus = "added" | "removed" | "modified" | "renamed" | "copied" | "changed";
 export type ViewedState = "VIEWED" | "UNVIEWED" | "DISMISSED";
 /** A version of a changed file: the merge base ("old", at `previousPath` for renames) or the PR head ("new"). */
@@ -53,6 +56,7 @@ export interface PrDetail {
   title: string;
   author: string;
   url: string;
+  state: PrState;
   baseRef: string;
   headRef: string;
   baseSha: string;
