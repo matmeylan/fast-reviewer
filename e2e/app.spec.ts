@@ -464,3 +464,107 @@ test("files the app can't show open in their default app", async ({ page }) => {
     .toEqual([{ owner: "acme", repo: "web", number: 482, path: "docs/guide.pdf", side: "new" }]);
   await expect(page.getByTestId("toast")).toHaveCount(0);
 });
+
+test("line comments: read threads, write drafts, send them with the review", async ({ page }) => {
+  await openMainPr(page);
+  // The mock's orders.py has an open thread on an added line and a resolved one on a removed line.
+  const popover = page.getByTestId("comment-popover");
+  const marked = page.locator('.ln[data-cmt][data-side="new"]');
+  await expect(marked).toHaveCount(1);
+  await expect(page.locator('.ln[data-cmt][data-side="old"]')).toHaveCount(1);
+  await marked.click();
+  await expect(popover.getByTestId("comment-thread")).toHaveCount(1);
+  await expect(popover).toContainText("Should this validate the page size?");
+  await expect(popover).toContainText("I'll cap it at 100");
+  await expect(popover.getByTestId("comment-body")).toHaveCount(0);
+  // Clicking the open line again closes it.
+  await marked.click();
+  await expect(popover).toBeHidden();
+
+  // A changed line without comments opens straight into a focused comment box.
+  const line = page.locator('.ln.cm:not([data-cmt])[data-side="new"]').first();
+  const lineNo = Number(await line.textContent());
+  await line.click();
+  await expect(popover.getByTestId("comment-body")).toBeFocused();
+  // Typing in it doesn't trigger shortcuts.
+  await page.keyboard.type("nit: rename j");
+  await page.keyboard.press("Control+Enter");
+  await expect(popover.getByTestId("comment-draft")).toContainText("nit: rename j");
+  expect(await selectedPath(page)).toBe("api/routes/orders.py");
+  await page.keyboard.press("Escape");
+  await expect(popover).toBeHidden();
+  await expect(page.locator(`.ln[data-side="new"][data-cmt="1"]`, { hasText: new RegExp(`^${lineNo}$`) })).toHaveCount(1);
+
+  // Drafts survive a restart.
+  await page.reload();
+  await expect(page.getByTestId("current-path")).toHaveText("api/routes/orders.py");
+  await expect(page.locator('.ln[data-cmt][data-side="new"]')).toHaveCount(2);
+
+  // A review of line comments alone needs no body.
+  await page.keyboard.press("a");
+  const dialog = page.getByTestId("review-dialog");
+  await expect(dialog.getByTestId("review-pending")).toHaveText("1 line comment will be sent with this review.");
+  await expect(dialog.getByTestId("review-comment")).toBeEnabled();
+  await dialog.getByTestId("review-comment").click();
+  await expect(dialog.getByTestId("review-success")).toContainText("Review submitted");
+  expect(await mockReviews(page)).toMatchObject([
+    { event: "COMMENT", body: "", comments: [{ path: "api/routes/orders.py", side: "new", line: lineNo, body: "nit: rename j" }] },
+  ]);
+  await page.keyboard.press("Escape");
+  // The draft is now a thread on GitHub.
+  await page.locator(`.ln[data-side="new"][data-cmt="1"]`, { hasText: new RegExp(`^${lineNo}$`) }).click();
+  await expect(popover.getByTestId("comment-thread")).toContainText("nit: rename j");
+  await expect(popover.getByTestId("comment-draft")).toHaveCount(0);
+});
+
+test("closing a comment box keeps the text as a draft; drafts can be edited and deleted", async ({ page }) => {
+  await openMainPr(page);
+  const popover = page.getByTestId("comment-popover");
+  const first = page.locator('.ln.cm:not([data-cmt])[data-side="old"]').first();
+  const lineNo = await first.textContent();
+  const line = page.locator('.ln.cm[data-side="old"]', { hasText: new RegExp(`^${lineNo}$`) });
+  await line.click();
+  await page.keyboard.type("Why remove this?");
+  // A click elsewhere closes it, keeping the text.
+  await page.getByTestId("current-path").click();
+  await expect(popover).toBeHidden();
+  await expect(line).toHaveAttribute("data-cmt", "1");
+  await line.click();
+  await expect(popover.getByTestId("comment-draft")).toContainText("Why remove this?");
+  await popover.getByRole("button", { name: "Edit draft" }).click();
+  await popover.getByTestId("draft-edit").fill("Why was this removed?");
+  await popover.getByTestId("draft-save").click();
+  await expect(popover.getByTestId("comment-draft")).toContainText("Why was this removed?");
+  await popover.getByTestId("draft-delete").click();
+  await expect(popover.getByTestId("comment-draft")).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await expect(line).not.toHaveAttribute("data-cmt");
+});
+
+test("c comments on the line under the mouse", async ({ page }) => {
+  await openMainPr(page);
+  const popover = page.getByTestId("comment-popover");
+  // Over the code of an added line (not its line number), in the new half.
+  const added = page.locator(".dc.add .dt").first();
+  await added.hover();
+  await page.keyboard.press("c");
+  await expect(popover.getByTestId("comment-body")).toBeFocused();
+  // c typed into the box is text, not a shortcut.
+  await page.keyboard.type("cc");
+  await expect(popover.getByTestId("comment-body")).toHaveValue("cc");
+  await page.keyboard.press("Control+Enter");
+  await page.keyboard.press("Escape");
+  await expect(popover).toBeHidden();
+
+  // A line that already has a thread opens with the box ready too.
+  await page.locator('.ln[data-cmt][data-side="new"]').first().hover();
+  await page.keyboard.press("c");
+  await expect(popover.getByTestId("comment-thread").first()).toBeVisible();
+  await expect(popover.getByTestId("comment-body")).toBeFocused();
+  await page.keyboard.press("Escape");
+
+  // Nothing happens with the mouse outside the diff.
+  await page.getByTestId("current-path").hover();
+  await page.keyboard.press("c");
+  await expect(popover).toBeHidden();
+});

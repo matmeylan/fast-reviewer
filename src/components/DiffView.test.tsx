@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
-import DiffView, { ROW_HEIGHT } from "./DiffView";
+import DiffView, { ROW_HEIGHT, type DiffComments, type LineRef } from "./DiffView";
 import { anchorRow, buildRows, emptyExpansion, splitTextLines, type Row } from "./diff-rows";
 import type { DiffLine, FileDiff, Hunk } from "../lib/types";
 
@@ -109,6 +109,132 @@ describe("DiffView", () => {
     expect(all[0]).toBe("n1");
     // Nothing hidden above any more: the header is gone.
     expect(container.querySelector(".dh .dhh")?.textContent ?? "").not.toContain("@@");
+  });
+
+  it("opens comments from line numbers: hunk lines take new ones, other lines only show existing ones", () => {
+    const newText = Array.from({ length: 60 }, (_, i) => `n${i + 1}`).join("\n");
+    const diff: FileDiff = {
+      ...base,
+      newText,
+      oldText: newText.replace("n40", "o40"),
+      hunks: [
+        {
+          oldStart: 40, oldLines: 1, newStart: 40, newLines: 1,
+          lines: [
+            { kind: "del", oldNo: 40, newNo: null, text: "o40", segments: null },
+            { kind: "add", oldNo: null, newNo: 40, text: "n40", segments: null },
+          ],
+        },
+      ],
+    };
+    const opened: [LineRef, boolean][] = [];
+    const [open, setOpen] = createSignal<LineRef | null>(null);
+    const comments: DiffComments = {
+      // An existing thread on line 30, outside the hunk.
+      count: (side, line) => (side === "new" && line === 30 ? 2 : 0),
+      onOpen: (at, canComment) => {
+        opened.push([at, canComment]);
+        setOpen(at);
+      },
+      get open() {
+        return open();
+      },
+      popover: <div data-testid="pop">popover</div>,
+    };
+    const { container, queryByTestId } = render(() => <DiffView diff={diff} mode="split" comments={comments} />);
+    const ln = (side: string, no: number) =>
+      [...container.querySelectorAll<HTMLElement>(`.ln[data-side="${side}"]`)].find((e) => e.textContent === String(no));
+    expect(ln("old", 40)!.classList.contains("cm")).toBe(true);
+    ln("old", 40)!.click();
+    expect(opened).toEqual([[{ side: "old", line: 40 }, true]]);
+    // The popover sits under the opened line's row (after the hunk header).
+    const pop = container.querySelector<HTMLElement>(".dv-popover")!;
+    expect(queryByTestId("pop")).not.toBeNull();
+    expect(pop.style.top).toBe(`${2 * ROW_HEIGHT}px`);
+    expect(pop.classList.contains("right")).toBe(false);
+    ln("new", 40)!.click();
+    expect(container.querySelector(".dv-popover")!.classList.contains("right")).toBe(true);
+
+    container.querySelector<HTMLButtonElement>('[title="Expand up"]')!.click();
+    // Expanded context is not in GitHub's diff: no new comments there...
+    expect(ln("new", 31)!.classList.contains("cm")).toBe(false);
+    ln("new", 31)!.click();
+    expect(opened).toHaveLength(2);
+    // ...but existing ones still show and open.
+    const marked = ln("new", 30)!;
+    expect(marked.dataset.cmt).toBe("2");
+    marked.click();
+    expect(opened[2]).toEqual([{ side: "new", line: 30 }, false]);
+  });
+
+  it("c opens the line under the mouse: its side in split, its own side in unified", () => {
+    const diff: FileDiff = {
+      ...base,
+      hunks: [
+        {
+          oldStart: 1, oldLines: 2, newStart: 1, newLines: 2,
+          lines: [
+            { kind: "context", oldNo: 1, newNo: 1, text: "same", segments: null },
+            { kind: "del", oldNo: 2, newNo: null, text: "old", segments: null },
+            { kind: "add", oldNo: null, newNo: 2, text: "new", segments: null },
+          ],
+        },
+      ],
+    };
+    const opened: [LineRef, boolean, string][] = [];
+    const [request, setRequest] = createSignal(0);
+    const [mode, setMode] = createSignal<"split" | "unified">("split");
+    const comments: DiffComments = {
+      count: () => 0,
+      onOpen: (at, canComment, how) => opened.push([at, canComment, how]),
+      open: null,
+      popover: null,
+      get request() {
+        return request();
+      },
+    };
+    const { container } = render(() => <DiffView diff={diff} mode={mode()} comments={comments} />);
+    const scroller = container.querySelector<HTMLElement>(".dv-scroll")!;
+    // jsdom has no layout: the element "under the mouse" is picked by the test.
+    let under: Element | null = null;
+    const orig = document.elementFromPoint;
+    document.elementFromPoint = () => under;
+    const press = (el: Element | null) => {
+      under = el;
+      scroller.dispatchEvent(new MouseEvent("pointermove", { clientX: 1, clientY: 1, bubbles: true }));
+      setRequest((n) => n + 1);
+    };
+    try {
+      const code = (text: string, side?: string) =>
+        [...container.querySelectorAll(`.dc${side ? `[data-side="${side}"]` : ""} .dt`)].find((e) => e.textContent === text)!;
+      press(code("new", "new"));
+      press(code("old", "old"));
+      press(code("same", "old"));
+      // Nothing on the hunk header or the empty half of a pair.
+      press(container.querySelector(".dh"));
+      press(container.querySelector(".dc.fill"));
+      expect(opened).toEqual([
+        [{ side: "new", line: 2 }, true, "key"],
+        [{ side: "old", line: 2 }, true, "key"],
+        [{ side: "old", line: 1 }, true, "key"],
+      ]);
+      opened.length = 0;
+      setMode("unified");
+      press(code("old"));
+      press(code("same"));
+      press(container.querySelectorAll('.dr .ln[data-side="old"]')[0]);
+      expect(opened.map(([at]) => at)).toEqual([
+        { side: "old", line: 2 },
+        { side: "new", line: 1 },
+        { side: "old", line: 1 },
+      ]);
+      // After the mouse leaves the diff, c does nothing.
+      scroller.dispatchEvent(new MouseEvent("pointerleave"));
+      setRequest((n) => n + 1);
+      expect(opened).toHaveLength(3);
+    } finally {
+      document.elementFromPoint = orig;
+    }
   });
 
   it("virtualizes a 5000-line diff and switches modes quickly", () => {

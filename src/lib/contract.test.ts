@@ -11,11 +11,14 @@ import type {
   FileStatus,
   Hunk,
   LineKind,
+  NewComment,
   PrDetail,
   PrState,
   PrSummary,
   RepoSummary,
+  ReviewComment,
   ReviewEvent,
+  ReviewThread,
   Side,
   SubmittedReview,
   ViewedState,
@@ -46,6 +49,11 @@ const fileDiffKeys = keys<FileDiff>({
 const hunkKeys = keys<Hunk>({ oldStart: true, oldLines: true, newStart: true, newLines: true, lines: true });
 const lineKeys = keys<DiffLine>({ kind: true, oldNo: true, newNo: true, text: true, segments: true });
 const reviewKeys = keys<SubmittedReview>({ id: true, url: true, state: true });
+const threadKeys = keys<ReviewThread>({
+  id: true, path: true, line: true, side: true, resolved: true, outdated: true, comments: true,
+});
+const commentKeys = keys<ReviewComment>({ id: true, author: true, body: true, createdAt: true, url: true });
+const newCommentKeys = keys<NewComment>({ path: true, side: true, line: true, body: true });
 
 // Exhaustive enum lists: adding a union member without listing it fails typecheck.
 const all = <T extends string>() => <A extends readonly T[]>(a: A & ([T] extends [A[number]] ? unknown : never)) => [...a];
@@ -73,6 +81,9 @@ describe("IPC contract fixture", () => {
     expect(sorted(fixture.fileDiff.hunks[0])).toEqual(hunkKeys);
     for (const l of fixture.fileDiff.hunks[0].lines) expect(sorted(l)).toEqual(lineKeys);
     expect(sorted(fixture.submittedReview)).toEqual(reviewKeys);
+    expect(sorted(fixture.reviewThread)).toEqual(threadKeys);
+    for (const c of fixture.reviewThread.comments) expect(sorted(c)).toEqual(commentKeys);
+    expect(sorted(fixture.newComment)).toEqual(newCommentKeys);
   });
 
   it("enum values match types.ts", () => {

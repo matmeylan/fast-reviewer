@@ -25,16 +25,17 @@ export default function ReviewForm(props: { store: AppStore; autofocus?: boolean
   const s = props.store;
   let textarea!: HTMLTextAreaElement;
   // The button that was pressed gets the spinner; the store only knows something is in flight.
-  const [pending, setPending] = createSignal<ReviewEvent | null>(null);
-  const canComment = () => !s.reviewSubmitting() && s.reviewDraft().trim() !== "";
-  const busy = (event: ReviewEvent) => s.reviewSubmitting() && pending() === event;
+  const [pressed, setPressed] = createSignal<ReviewEvent | null>(null);
+  const pending = () => s.drafts().length;
+  const canComment = () => !s.reviewSubmitting() && (s.reviewDraft().trim() !== "" || pending() > 0);
+  const busy = (event: ReviewEvent) => s.reviewSubmitting() && pressed() === event;
 
   onMount(() => props.autofocus && textarea.focus());
 
   async function submit(event: ReviewEvent) {
-    setPending(event);
+    setPressed(event);
     await s.submitReview(event);
-    setPending(null);
+    setPressed(null);
   }
 
   function onKeyDown(e: KeyboardEvent) {
@@ -63,6 +64,11 @@ export default function ReviewForm(props: { store: AppStore; autofocus?: boolean
             onKeyDown={onKeyDown}
             data-testid="review-body"
           />
+          <Show when={pending() > 0}>
+            <p class="text-xs text-muted-foreground" data-testid="review-pending">
+              {pending() === 1 ? "1 line comment" : `${pending()} line comments`} will be sent with this review.
+            </p>
+          </Show>
           <Show when={s.reviewError()}>
             {(err) => (
               <p class="flex items-start gap-1.5 text-sm text-destructive" role="alert" data-testid="review-error">

@@ -26,7 +26,7 @@ const REPEATABLE = new Set<Action>(["next", "prev", "skip", "nextHunk", "prevHun
 const isMac = typeof navigator !== "undefined" && /Mac/.test(navigator.platform);
 /** Actions that move within the file list, and ones that work inside the diff. */
 const TREE_ACTIONS = new Set<Action>(["review", "skip", "next", "prev", "toggleViewed", "focusFilter"]);
-const DIFF_ACTIONS = new Set<Action>(["nextHunk", "prevHunk", "find", "findNext", "findPrev"]);
+const DIFF_ACTIONS = new Set<Action>(["nextHunk", "prevHunk", "find", "findNext", "findPrev", "commentLine"]);
 
 export default function App(props: { backend?: Backend }) {
   const [store, setStore] = createSignal<AppStore | null>(null);

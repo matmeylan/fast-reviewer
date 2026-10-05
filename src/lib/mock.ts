@@ -2,7 +2,8 @@
 // Query flags: ?mock=unauth (start signed out), ?mock=failviewed (setFileViewed rejects),
 // ?mock=failreview (submitReview rejects), ?mockViewedDelay=<ms> (setFileViewed takes
 // that long; other calls are unaffected). Submitted reviews are recorded in `reviews`
-// and, in a browser, `window.__mockReviews` (for e2e).
+// and, in a browser, `window.__mockReviews` (for e2e). acme/web#482 starts with review
+// threads on api/routes/orders.py; a review's line comments become new threads.
 import type { Backend } from "./api";
 import type {
   AuthStatus,
@@ -11,10 +12,12 @@ import type {
   FileDiff,
   FileStatus,
   Hunk,
+  NewComment,
   PrDetail,
   PrSummary,
   RepoSummary,
   ReviewEvent,
+  ReviewThread,
   Side,
   SubmittedReview,
 } from "./types";
@@ -842,6 +845,48 @@ interface LoadedPr {
   detail: PrDetail;
   specs: Map<string, FileSpec>;
   diffs: Map<string, FileDiff>;
+  threads: ReviewThread[];
+}
+
+/** GitHub only takes line comments on lines inside the diff's hunks. */
+function inHunks(diff: FileDiff | undefined, side: Side, line: number): boolean {
+  return !!diff?.hunks.some((h) => h.lines.some((l) => (side === "old" ? l.oldNo : l.newNo) === line));
+}
+
+/** Review threads on api/routes/orders.py: an open one on its first added line, a resolved one on its first removed line, an outdated one. */
+function seedThreads(diffs: Map<string, FileDiff>, prUrl: string): ReviewThread[] {
+  const path = "api/routes/orders.py";
+  const lines = diffs.get(path)?.hunks.flatMap((h) => h.lines) ?? [];
+  const added = lines.find((l) => l.kind === "add")?.newNo;
+  const removed = lines.find((l) => l.kind === "del")?.oldNo;
+  const comment = (id: string, author: string, body: string, daysAgo: number) => ({
+    id: `PRRC_${id}`,
+    author,
+    body,
+    createdAt: new Date(Date.now() - daysAgo * 86_400_000).toISOString(),
+    url: `${prUrl}#discussion_${id}`,
+  });
+  const threads: ReviewThread[] = [];
+  if (added != null) {
+    threads.push({
+      id: "PRRT_open", path, line: added, side: "new", resolved: false, outdated: false,
+      comments: [
+        comment("o1", "mona", "Should this validate the page size?\nLarge values could be slow.", 2),
+        comment("o2", "hubot", "Good point, I'll cap it at 100.", 1),
+      ],
+    });
+  }
+  if (removed != null) {
+    threads.push({
+      id: "PRRT_resolved", path, line: removed, side: "old", resolved: true, outdated: false,
+      comments: [comment("r1", "mona", "Is anything still calling this?", 3)],
+    });
+  }
+  threads.push({
+    id: "PRRT_outdated", path, line: null, side: "new", resolved: false, outdated: true,
+    comments: [comment("x1", "mona", "Typo in the docstring.", 5)],
+  });
+  return threads;
 }
 
 function toDiff(spec: FileSpec): FileDiff {
@@ -910,6 +955,7 @@ export interface MockReview extends SubmittedReview {
   number: number;
   event: ReviewEvent;
   body: string;
+  comments: NewComment[];
   commitId: string;
 }
 
@@ -994,7 +1040,7 @@ export function createMockBackend(opts: MockOptions = optionsFromLocation()): Mo
       totalFiles: files.length,
       filesTruncated: false,
     };
-    const lp = { detail, specs, diffs };
+    const lp: LoadedPr = { detail, specs, diffs, threads: key === "acme/web#482" ? seedThreads(diffs, detail.url) : [] };
     loaded.set(key, lp);
     byId.set(detail.id, lp);
     return lp;
@@ -1089,16 +1135,28 @@ export function createMockBackend(opts: MockOptions = optionsFromLocation()): Mo
         if (isViewed) seen.add(path);
         else seen.delete(path);
       }, opts.viewedDelayMs ?? latency),
-    submitReview: (owner, repo, number, event, body) =>
+    listReviewThreads: (owner, repo, number) =>
+      wait(() => {
+        requireAuth();
+        return structuredClone(load(owner, repo, number).threads);
+      }),
+    submitReview: (owner, repo, number, event, body, comments) =>
       wait(() => {
         requireAuth();
         // Same checks and messages as the Rust core / GitHub.
         const text = body.trim();
-        if (event === "COMMENT" && !text) throw new Error("Write a comment before submitting");
+        if (event === "COMMENT" && !text && comments.length === 0) throw new Error("Write a comment before submitting");
+        if (comments.some((c) => !c.body.trim())) throw new Error("A line comment is empty");
         if (opts.failReview) throw new Error("GitHub API error 502: Server Error");
-        const { detail } = load(owner, repo, number);
+        const lp = load(owner, repo, number);
+        const { detail } = lp;
         if (event === "APPROVE" && detail.author === auth.login) {
           throw new Error("GitHub API error 422: Can not approve your own pull request");
+        }
+        for (const c of comments) {
+          if (!inHunks(lp.diffs.get(c.path), c.side, c.line)) {
+            throw new Error("GitHub API error 422: Line could not be resolved");
+          }
         }
         const id = 1000 + reviews.length;
         const review: MockReview = {
@@ -1110,9 +1168,23 @@ export function createMockBackend(opts: MockOptions = optionsFromLocation()): Mo
           number,
           event,
           body: text,
+          comments,
           commitId: detail.headSha,
         };
         reviews.push(review);
+        comments.forEach((c, i) =>
+          lp.threads.push({
+            id: `PRRT_mock_${id}_${i}`,
+            path: c.path,
+            line: c.line,
+            side: c.side,
+            resolved: false,
+            outdated: false,
+            comments: [
+              { id: `PRRC_mock_${id}_${i}`, author: auth.login ?? "octocat", body: c.body, createdAt: new Date().toISOString(), url: `${review.url}` },
+            ],
+          }),
+        );
         return { id: review.id, url: review.url, state: review.state };
       }, opts.latencyMs ?? REVIEW_LATENCY_MS),
     openUrl: (url) =>

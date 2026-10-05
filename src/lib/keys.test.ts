@@ -25,6 +25,8 @@ describe("keyToAction", () => {
     expect(keyToAction({ key: "k" }, false)).toBe("prev");
     expect(keyToAction({ key: "?" }, false)).toBe("help");
     expect(keyToAction({ key: "a" }, false)).toBe("writeReview");
+    expect(keyToAction({ key: "c" }, false)).toBe("commentLine");
+    expect(keyToAction({ key: "c" }, true)).toBeNull();
     expect(keyToAction({ key: "x" }, false)).toBeNull();
   });
 
@@ -146,6 +148,11 @@ describe("reduce", () => {
     expect(reduce(state({ overlay: "review" }), "escape")).toEqual({ overlay: "none", effects: [] });
     expect(reduce(state({ overlay: "review" }), "next")).toEqual({ effects: [] });
     expect(reduce(state({ overlay: "picker" }), "writeReview")).toEqual({ effects: [] });
+  });
+
+  it("c asks the diff for a comment on the line under the mouse, but not under a dialog", () => {
+    expect(reduce(state(), "commentLine")).toEqual({ effects: [{ type: "commentLine" }] });
+    expect(reduce(state({ overlay: "review" }), "commentLine")).toEqual({ effects: [] });
   });
 
   it("hunk navigation and open browser are effects", () => {

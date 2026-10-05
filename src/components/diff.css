@@ -212,3 +212,50 @@
   font: inherit;
   cursor: pointer;
 }
+
+/* Review comments: clickable line numbers, a count marker, the popover under a line. */
+.ln.cm { cursor: pointer; }
+.ln.cm:hover, .ln.cm-open { color: var(--dv-fg); }
+.ln.cm-open { box-shadow: inset 2px 0 0 var(--primary); }
+.ln.cm::before {
+  position: absolute;
+  top: 2px;
+  left: 3px;
+  display: grid;
+  place-items: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 3px;
+  border-radius: 4px;
+  font-family: var(--font-sans);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+}
+.ln.cm:not([data-cmt]):hover::before {
+  content: "+";
+  font-size: 13px;
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+.ln.cm[data-cmt]::before {
+  content: attr(data-cmt);
+  background: color-mix(in oklab, var(--primary) 18%, var(--background));
+  color: var(--primary);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--primary) 45%, transparent);
+}
+.ln.cm[data-cmt]:hover::before { background: var(--primary); color: var(--primary-foreground); }
+
+.dv-popover {
+  position: absolute;
+  z-index: 2;
+  left: var(--gw);
+  width: min(520px, calc(100% - var(--gw) - 12px));
+  padding: 4px 0 8px;
+}
+.unified .dv-popover { left: calc(var(--gw) * 2); width: min(520px, calc(100% - var(--gw) * 2 - 12px)); }
+/* The new side: under its gutter when there is room, else as far right as fits. */
+.split .dv-popover.right {
+  left: max(12px, min(calc(50% + var(--gw)), calc(100% - 532px)));
+  width: min(520px, calc(100% - 24px));
+}

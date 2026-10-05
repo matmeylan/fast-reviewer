@@ -181,3 +181,43 @@ pub struct SubmittedReview {
     /// GitHub's review state, e.g. `COMMENTED` or `APPROVED`.
     pub state: String,
 }
+
+/// A line comment sent with a review (`submit_review`). `line` is a line number of the
+/// file on `side`: the head for `New`, the merge base for `Old`. It must be inside one of
+/// the diff's hunks; GitHub rejects comments on lines outside them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NewComment {
+    pub path: String,
+    pub side: Side,
+    pub line: u32,
+    pub body: String,
+}
+
+/// A review comment thread on a PR.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewThread {
+    pub id: String,
+    pub path: String,
+    /// Line of the file on `side` the thread is on (its last line for a multi-line
+    /// comment). None when the thread is outdated or on the whole file.
+    pub line: Option<u32>,
+    pub side: Side,
+    pub resolved: bool,
+    pub outdated: bool,
+    /// Oldest first.
+    pub comments: Vec<ReviewComment>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewComment {
+    pub id: String,
+    pub author: String,
+    /// Markdown source.
+    pub body: String,
+    pub created_at: String,
+    /// The comment on github.com.
+    pub url: String,
+}

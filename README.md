@@ -15,6 +15,7 @@ A fast desktop app for reviewing GitHub pull requests: a file tree on the left, 
 - **Open with default app**: files the diff can't show (PDFs, archives, fonts, files too large to diff) have buttons to open the new or old version in the app your OS uses for that file type. The file is written to a temp folder first.
 - **Find in file** (`⌘F`): highlights every match in the current diff, including lines scrolled out of view; `Enter` / `⇧Enter` (or `⌘G` / `⇧⌘G`) step through them. With text selected in the diff, `⌘F` searches for it, starting at that occurrence. The query stays when you move to another file.
 - **Syntax highlighting**: VS Code-quality highlighting (Shiki / TextMate grammars) for TypeScript, TSX, JavaScript, HTML, CSS, Python, JSON, Markdown, Rust, Go and more than 200 other languages. Highlighting runs in a Web Worker, so it never blocks scrolling. Grammars load on demand; when a PR opens, the grammars for its languages are loaded and warmed while the first diff is fetched.
+- **Line comments**: click a line number (or press `c` with the mouse over a line) to see that line's comments or write one. Your comments stay as drafts (saved across restarts) and are sent with your review. A marker in the gutter shows how many comments a line has. Only changed lines and the few lines around them can take new comments, as on GitHub; reply to or resolve a thread on GitHub.
 - **Submit your review**: after the last file, the "All files reviewed" screen has a comment box with **Comment** and **Approve**; the **Review** button in the header (or `a`) opens the same form at any time. `⌘Enter` sends the comment. The review is pinned to the commit you reviewed. GitHub doesn't let you approve your own PR, so Approve is disabled there. If GitHub rejects the review, its reason is shown and your text is kept.
 - **GitHub sync**: "viewed" state is read from GitHub and written back in the background. It is the same checkbox as on github.com. If the write fails, the change is undone and a message is shown. If GitHub's GraphQL API is unavailable (some proxies and GHE setups), PRs load over REST instead; REST has no viewed state, so every file starts unviewed.
 - **Speed**: the diffs of the next 3 unviewed files are fetched ahead of time, so `r` and `s` switch files in under 20 ms. Only visible rows are rendered, which keeps 5,000-line diffs smooth. Diffs are computed in Rust and cached in memory, and file contents are cached on disk by commit SHA.
@@ -34,6 +35,7 @@ A fast desktop app for reviewing GitHub pull requests: a file tree on the left, 
 | `/` | Filter files |
 | `⌘F` / `Ctrl+F` | Find in file (searches for the selected text, if any) |
 | `⌘G` / `⇧⌘G` | Next / previous match (also `Enter` / `⇧Enter` in the find bar) |
+| `c` | Comment on the line under the mouse |
 | `a` | Comment on or approve the PR (`⌘Enter` / `Ctrl+Enter` in the comment box sends a comment) |
 | `o` | Open the PR in the browser |
 | `⌘K` / `Ctrl+K` | Open a pull request |
