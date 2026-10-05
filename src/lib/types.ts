@@ -116,3 +116,37 @@ export interface SubmittedReview {
   /** GitHub's review state, e.g. "COMMENTED" or "APPROVED". */
   state: string;
 }
+
+/**
+ * A line comment sent with a review. `line` is a line of the file on `side` ("new": the
+ * head, "old": the merge base), inside one of the diff's hunks (GitHub rejects others).
+ */
+export interface NewComment {
+  path: string;
+  side: Side;
+  line: number;
+  body: string;
+}
+
+/** A review comment thread on a PR. */
+export interface ReviewThread {
+  id: string;
+  path: string;
+  /** Line of the file on `side` (the last one for a multi-line comment). Null when outdated or on the whole file. */
+  line: number | null;
+  side: Side;
+  resolved: boolean;
+  outdated: boolean;
+  /** Oldest first. */
+  comments: ReviewComment[];
+}
+
+export interface ReviewComment {
+  id: string;
+  author: string;
+  /** Markdown source. */
+  body: string;
+  createdAt: string;
+  /** The comment on github.com. */
+  url: string;
+}

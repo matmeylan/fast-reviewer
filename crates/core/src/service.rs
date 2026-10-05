@@ -14,8 +14,8 @@ use crate::diff;
 use crate::error::{Error, Result};
 use crate::github::{Content, GitHub, DEFAULT_API_URL};
 use crate::model::{
-    AuthSource, AuthStatus, FileDiff, FileStatus, InboxReason, PrDetail, PrSummary, RepoSummary,
-    ReviewEvent, Side, SubmittedReview,
+    AuthSource, AuthStatus, FileDiff, FileStatus, InboxReason, NewComment, PrDetail, PrSummary,
+    RepoSummary, ReviewEvent, ReviewThread, Side, SubmittedReview,
 };
 use crate::temp_copy;
 
@@ -746,9 +746,22 @@ impl Service {
         self.on_err(gen, res).await
     }
 
-    /// Submit a review on the head commit `get_pr` last saw, so it is pinned to what was
-    /// reviewed even if the branch moved since. GitHub rejects a comment review without
-    /// a body (422), so that is refused here without a request.
+    /// The PR's review comment threads, oldest first.
+    pub async fn list_review_threads(
+        &self,
+        owner: &str,
+        repo: &str,
+        number: u64,
+    ) -> Result<Vec<ReviewThread>> {
+        let gen = self.ensure_auth().await?.generation;
+        let res = self.gh.review_threads(owner, repo, number).await;
+        self.on_err(gen, res).await
+    }
+
+    /// Submit a review, with its line comments, on the head commit `get_pr` last saw, so
+    /// it is pinned to what was reviewed even if the branch moved since. GitHub rejects
+    /// a comment review with neither a body nor comments (422), so that is refused here
+    /// without a request, as are empty comments.
     pub async fn submit_review(
         self: &Arc<Self>,
         owner: &str,
@@ -756,16 +769,20 @@ impl Service {
         number: u64,
         event: ReviewEvent,
         body: &str,
+        comments: &[NewComment],
     ) -> Result<SubmittedReview> {
         let body = body.trim();
-        if event == ReviewEvent::Comment && body.is_empty() {
+        if event == ReviewEvent::Comment && body.is_empty() && comments.is_empty() {
             return Err(Error::Other("Write a comment before submitting".into()));
+        }
+        if comments.iter().any(|c| c.body.trim().is_empty()) {
+            return Err(Error::Other("A line comment is empty".into()));
         }
         let gen = self.ensure_auth().await?.generation;
         let info = self.pr_info(owner, repo, number).await?;
         let res = self
             .gh
-            .submit_review(owner, repo, number, &info.head_sha, event, body)
+            .submit_review(owner, repo, number, &info.head_sha, event, body, comments)
             .await;
         self.on_err(gen, res).await
     }

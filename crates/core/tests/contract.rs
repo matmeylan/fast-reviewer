@@ -125,6 +125,33 @@ fn structs_serialize_like_fixture() {
         f["submittedReview"]
     );
 
+    let thread = ReviewThread {
+        id: "PRRT_kwDOAbc".into(),
+        path: "src/new.ts".into(),
+        line: Some(2),
+        side: Side::New,
+        resolved: false,
+        outdated: false,
+        comments: vec![ReviewComment {
+            id: "PRRC_kwDOAbc".into(),
+            author: "hubot".into(),
+            body: "Why `2`?".into(),
+            created_at: "2026-01-02T03:04:05Z".into(),
+            url: "https://github.com/octo/app/pull/42#discussion_r1".into(),
+        }],
+    };
+    assert_eq!(to_json(&thread), f["reviewThread"]);
+    // submit_review takes comments as the UI sends them.
+    assert_eq!(
+        serde_json::from_value::<NewComment>(f["newComment"].clone()).unwrap(),
+        NewComment {
+            path: "src/new.ts".into(),
+            side: Side::Old,
+            line: 2,
+            body: "Was 2 wrong?".into(),
+        }
+    );
+
     // And the fixture deserializes back into the same values.
     assert_eq!(
         serde_json::from_value::<FileDiff>(f["fileDiff"].clone()).unwrap(),

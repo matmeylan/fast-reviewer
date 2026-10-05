@@ -10,8 +10,8 @@ use serde_json::{json, Value};
 
 use crate::error::{Error, Result};
 use crate::model::{
-    ChangedFile, FileStatus, InboxReason, PrState, PrSummary, RepoSummary, ReviewEvent,
-    SubmittedReview, ViewedState,
+    ChangedFile, FileStatus, InboxReason, NewComment, PrState, PrSummary, RepoSummary,
+    ReviewComment, ReviewEvent, ReviewThread, Side, SubmittedReview, ViewedState,
 };
 
 pub const DEFAULT_API_URL: &str = "https://api.github.com";
@@ -414,8 +414,36 @@ impl GitHub {
         })
     }
 
+    /// All review threads of a PR, oldest first (GraphQL, cursor-paginated). Each thread
+    /// keeps its first 100 comments.
+    pub async fn review_threads(
+        &self,
+        owner: &str,
+        repo: &str,
+        number: u64,
+    ) -> Result<Vec<ReviewThread>> {
+        let mut after: Option<String> = None;
+        let mut out = Vec::new();
+        for _ in 0..MAX_PAGES {
+            let vars = json!({ "owner": owner, "repo": repo, "number": number, "after": after });
+            let data: GqlThreadsData = self.graphql(THREADS_QUERY, vars).await?;
+            let GqlNodes { page_info, nodes } = data
+                .repository
+                .and_then(|r| r.pull_request)
+                .ok_or_else(|| Error::NotFound(format!("{owner}/{repo}#{number}")))?
+                .review_threads;
+            out.extend(nodes.into_iter().flatten().map(GqlThread::into_thread));
+            match page_info.end_cursor.filter(|_| page_info.has_next_page) {
+                Some(c) => after = Some(c),
+                None => break,
+            }
+        }
+        Ok(out)
+    }
+
     /// Submit a review pinned to `commit_id` (the head the viewer reviewed, not whatever
-    /// the branch points to now).
+    /// the branch points to now), with its line comments.
+    #[allow(clippy::too_many_arguments)]
     pub async fn submit_review(
         &self,
         owner: &str,
@@ -424,14 +452,28 @@ impl GitHub {
         commit_id: &str,
         event: ReviewEvent,
         body: &str,
+        comments: &[NewComment],
     ) -> Result<SubmittedReview> {
         let path = format!("/repos/{}/{}/pulls/{number}/reviews", enc(owner), enc(repo));
-        let r: Review = self
-            .post_json(
-                &path,
-                &json!({ "commit_id": commit_id, "body": body, "event": event }),
-            )
-            .await?;
+        let mut req = json!({ "commit_id": commit_id, "body": body, "event": event });
+        if !comments.is_empty() {
+            // A review of line comments alone has no body.
+            if let Some(req) = req.as_object_mut().filter(|_| body.is_empty()) {
+                req.remove("body");
+            }
+            req["comments"] = comments
+                .iter()
+                .map(|c| {
+                    json!({
+                        "path": c.path,
+                        "line": c.line,
+                        "side": match c.side { Side::Old => "LEFT", Side::New => "RIGHT" },
+                        "body": c.body,
+                    })
+                })
+                .collect();
+        }
+        let r: Review = self.post_json(&path, &req).await?;
         Ok(SubmittedReview {
             id: r.id,
             url: r.html_url,
@@ -551,6 +593,20 @@ const PR_QUERY: &str = r#"query($owner: String!, $repo: String!, $number: Int!, 
       files(first: 100, after: $after) {
         pageInfo { hasNextPage endCursor }
         nodes { path additions deletions changeType viewerViewedState }
+      }
+    }
+  }
+}"#;
+
+const THREADS_QUERY: &str = r#"query($owner: String!, $repo: String!, $number: Int!, $after: String) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) {
+      reviewThreads(first: 100, after: $after) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id path line diffSide isResolved isOutdated
+          comments(first: 100) { nodes { id author { login } body createdAt url } }
+        }
       }
     }
   }
@@ -678,6 +734,83 @@ impl GqlFile {
             viewed: self.viewer_viewed_state.unwrap_or(ViewedState::Unviewed),
         }
     }
+}
+
+#[derive(Deserialize)]
+struct GqlThreadsData {
+    repository: Option<GqlThreadsRepo>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GqlThreadsRepo {
+    pull_request: Option<GqlThreadsPr>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GqlThreadsPr {
+    review_threads: GqlNodes<GqlThread>,
+}
+
+#[derive(Deserialize)]
+struct GqlNodes<T> {
+    #[serde(rename = "pageInfo", default)]
+    page_info: PageInfo,
+    nodes: Vec<Option<T>>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GqlThread {
+    id: String,
+    path: String,
+    line: Option<u32>,
+    /// `LEFT` (the merge base) or `RIGHT` (the head).
+    diff_side: String,
+    is_resolved: bool,
+    is_outdated: bool,
+    comments: GqlNodes<GqlComment>,
+}
+
+impl GqlThread {
+    fn into_thread(self) -> ReviewThread {
+        ReviewThread {
+            id: self.id,
+            path: self.path,
+            line: self.line,
+            side: if self.diff_side == "LEFT" {
+                Side::Old
+            } else {
+                Side::New
+            },
+            resolved: self.is_resolved,
+            outdated: self.is_outdated,
+            comments: self
+                .comments
+                .nodes
+                .into_iter()
+                .flatten()
+                .map(|c| ReviewComment {
+                    id: c.id,
+                    author: c.author.map(|a| a.login).unwrap_or_else(|| "ghost".into()),
+                    body: c.body,
+                    created_at: c.created_at,
+                    url: c.url,
+                })
+                .collect(),
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GqlComment {
+    id: String,
+    author: Option<Login>,
+    body: String,
+    created_at: String,
+    url: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]

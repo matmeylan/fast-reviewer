@@ -11,7 +11,8 @@
 //!   get_file_content(owner: String, repo: String, number: u64, path: String, side: Side) -> raw bytes
 //!   open_file(owner: String, repo: String, number: u64, path: String, side: Side) -> ()
 //!   set_file_viewed(prId: String, path: String, viewed: bool) -> ()
-//!   submit_review(owner: String, repo: String, number: u64, event: ReviewEvent, body: String) -> SubmittedReview
+//!   list_review_threads(owner: String, repo: String, number: u64) -> Vec<ReviewThread>
+//!   submit_review(owner: String, repo: String, number: u64, event: ReviewEvent, body: String, comments: Vec<NewComment>) -> SubmittedReview
 //!   open_url(url: String) -> ()
 //! Errors are returned as `String` messages.
 //! Updates go through the updater and process plugins, called from src/lib/updater.ts.
@@ -19,7 +20,8 @@
 use std::sync::Arc;
 
 use fast_reviewer_core::model::{
-    AuthStatus, FileDiff, PrDetail, PrSummary, RepoSummary, ReviewEvent, Side, SubmittedReview,
+    AuthStatus, FileDiff, NewComment, PrDetail, PrSummary, RepoSummary, ReviewEvent, ReviewThread,
+    Side, SubmittedReview,
 };
 use fast_reviewer_core::{Config, Service};
 use tauri::ipc::Response;
@@ -127,6 +129,16 @@ async fn set_file_viewed(
 }
 
 #[tauri::command]
+async fn list_review_threads(
+    core: Core<'_>,
+    owner: String,
+    repo: String,
+    number: u64,
+) -> CmdResult<Vec<ReviewThread>> {
+    Ok(core.list_review_threads(&owner, &repo, number).await?)
+}
+
+#[tauri::command]
 async fn submit_review(
     core: Core<'_>,
     owner: String,
@@ -134,9 +146,10 @@ async fn submit_review(
     number: u64,
     event: ReviewEvent,
     body: String,
+    comments: Vec<NewComment>,
 ) -> CmdResult<SubmittedReview> {
     Ok(core
-        .submit_review(&owner, &repo, number, event, &body)
+        .submit_review(&owner, &repo, number, event, &body, &comments)
         .await?)
 }
 
@@ -201,6 +214,7 @@ pub fn run() {
             get_file_content,
             open_file,
             set_file_viewed,
+            list_review_threads,
             submit_review,
             open_url,
         ])

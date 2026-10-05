@@ -3,7 +3,17 @@
 import { batch, createMemo, createSignal } from "solid-js";
 import { createStore, reconcile } from "solid-js/store";
 import type { Backend } from "./api";
-import type { AuthStatus, FileDiff, PrDetail, PrSummary, ReviewEvent, Side, SubmittedReview } from "./types";
+import type {
+  AuthStatus,
+  FileDiff,
+  NewComment,
+  PrDetail,
+  PrSummary,
+  ReviewEvent,
+  ReviewThread,
+  Side,
+  SubmittedReview,
+} from "./types";
 import { buildTree, filterFiles, flattenFiles, isAncestor, type DirNode } from "./tree";
 import { nextUnviewed, reduce, upcomingUnviewed, type Action, type Mode, type Overlay } from "./keys";
 import { prefetchHighlight, warmHighlighter } from "./highlight-client";
@@ -29,6 +39,20 @@ export interface ReviewResult extends SubmittedReview {
   event: ReviewEvent;
 }
 
+/** A line comment written in the app, sent with the next review. */
+export interface DraftComment extends NewComment {
+  id: number;
+}
+
+/** The diff line whose comment popover is open. */
+export interface CommentTarget {
+  path: string;
+  side: Side;
+  line: number;
+  /** The line is in one of the diff's hunks, so GitHub takes comments on it. */
+  canComment: boolean;
+}
+
 export interface Toast {
   id: number;
   text: string;
@@ -50,6 +74,8 @@ const TOAST_MS = 4000;
 
 const KEY_MODE = "fr.mode";
 const KEY_LAST_PR = "fr.lastPr";
+/** Draft comments of a PR, `fr.drafts.<owner>/<repo>#<number>`: `{ headSha, drafts }`. */
+const KEY_DRAFTS = "fr.drafts.";
 
 export const storage = {
   get(key: string): string | null {
@@ -109,6 +135,10 @@ export function createAppStore(backend: Backend) {
   const [reviewSubmitting, setReviewSubmitting] = createSignal(false);
   const [reviewResult, setReviewResult] = createSignal<ReviewResult | null>(null);
   const [reviewError, setReviewError] = createSignal<string | null>(null);
+  // Review comments of the open PR: GitHub's threads, and drafts sent with the next review.
+  const [threads, setThreads] = createSignal<ReviewThread[]>([]);
+  const [drafts, setDraftsSignal] = createSignal<DraftComment[]>([]);
+  const [commentAt, setCommentAt] = createSignal<CommentTarget | null>(null);
 
   const fullTree = createMemo<DirNode | null>(() => {
     const p = pr();
@@ -136,6 +166,21 @@ export function createAppStore(backend: Backend) {
     const login = auth()?.login;
     return !!login && pr()?.author.toLowerCase() === login.toLowerCase();
   };
+  const threadsByPath = createMemo(() => {
+    const map = new Map<string, ReviewThread[]>();
+    for (const t of threads()) {
+      if (t.line == null) continue;
+      const list = map.get(t.path);
+      if (list) list.push(t);
+      else map.set(t.path, [t]);
+    }
+    return map;
+  });
+  /** Threads on a line (outdated and whole-file threads have none). */
+  const threadsAt = (path: string, side: Side, line: number) =>
+    (threadsByPath().get(path) ?? []).filter((t) => t.side === side && t.line === line);
+  const draftsAt = (path: string, side: Side, line: number) =>
+    drafts().filter((d) => d.path === path && d.side === side && d.line === line);
   const pickerOpen = () => overlay() === "picker" || (phase() === "ready" && !pr() && !prLoading());
 
   // --- toasts -------------------------------------------------------------
@@ -218,6 +263,7 @@ export function createAppStore(backend: Backend) {
     const seq = ++selectSeq;
     batch(() => {
       setSelected(path);
+      if (commentAt()?.path !== path) setCommentAt(null);
       setDone(false);
       for (const dir of Object.keys(collapsed)) {
         if (collapsed[dir] && isAncestor(dir, path)) setCollapsed(dir, false);
@@ -275,6 +321,62 @@ export function createAppStore(backend: Backend) {
     });
   }
 
+  // --- comments -------------------------------------------------------------
+  let threadsSeq = 0;
+
+  /** Load the open PR's review threads in the background; a failure only toasts. */
+  async function loadThreads() {
+    const p = pr();
+    if (!p) return;
+    const seq = ++threadsSeq;
+    try {
+      const t = await backend.listReviewThreads(p.owner, p.repo, p.number);
+      if (seq === threadsSeq) setThreads(t);
+    } catch (e) {
+      if (seq === threadsSeq) toast(`Couldn't load comments: ${errorMessage(e)}`);
+    }
+  }
+
+  let draftSeq = 0;
+
+  function setDrafts(next: DraftComment[]) {
+    setDraftsSignal(next);
+    const p = pr();
+    if (!p) return;
+    storage.set(KEY_DRAFTS + prKey(p), next.length ? JSON.stringify({ headSha: p.headSha, drafts: next }) : null);
+  }
+
+  /** The drafts saved for `p`. Drafts written on an older head are kept, with a warning: their lines may have moved. */
+  function restoreDrafts(p: PrDetail): DraftComment[] {
+    const raw = storage.get(KEY_DRAFTS + prKey(p));
+    if (!raw) return [];
+    try {
+      const saved = JSON.parse(raw) as { headSha: string; drafts: DraftComment[] };
+      const list = Array.isArray(saved.drafts) ? saved.drafts : [];
+      for (const d of list) draftSeq = Math.max(draftSeq, d.id);
+      if (list.length && saved.headSha !== p.headSha) {
+        toast(`${list.length} draft comment${list.length === 1 ? " was" : "s were"} written before the PR changed; check their lines`, "info");
+      }
+      return list;
+    } catch {
+      return [];
+    }
+  }
+
+  function addDraft(target: Pick<CommentTarget, "path" | "side" | "line">, body: string) {
+    if (!body.trim()) return;
+    setDrafts([...drafts(), { id: ++draftSeq, path: target.path, side: target.side, line: target.line, body }]);
+  }
+
+  function updateDraft(id: number, body: string) {
+    if (!body.trim()) return deleteDraft(id);
+    setDrafts(drafts().map((d) => (d.id === id ? { ...d, body } : d)));
+  }
+
+  function deleteDraft(id: number) {
+    setDrafts(drafts().filter((d) => d.id !== id));
+  }
+
   // --- review -------------------------------------------------------------
   let reviewSeq = 0;
 
@@ -289,13 +391,15 @@ export function createAppStore(backend: Backend) {
   }
 
   /**
-   * Submit the draft as a review of the open PR. On failure the error is kept for the
-   * form and the draft stays. A result that lands after another PR opened only toasts.
+   * Submit the draft, with the draft line comments, as a review of the open PR. On
+   * failure the error is kept for the form and the drafts stay. A result that lands
+   * after another PR opened only toasts.
    */
   async function submitReview(event: ReviewEvent): Promise<boolean> {
     const p = pr();
     const body = reviewDraft().trim();
-    if (!p || reviewSubmitting() || (event === "COMMENT" && !body)) return false;
+    const sent = drafts();
+    if (!p || reviewSubmitting() || (event === "COMMENT" && !body && sent.length === 0)) return false;
     const seq = ++reviewSeq;
     batch(() => {
       setReviewSubmitting(true);
@@ -303,16 +407,26 @@ export function createAppStore(backend: Backend) {
     });
     const label = event === "APPROVE" ? "Approved" : "Review submitted";
     try {
-      const r = await backend.submitReview(p.owner, p.repo, p.number, event, body);
+      const comments = sent.map(({ path, side, line, body }) => ({ path, side, line, body }));
+      const r = await backend.submitReview(p.owner, p.repo, p.number, event, body, comments);
+      // Drafts written while the review was in flight stay for the next one.
+      const sentIds = new Set(sent.map((d) => d.id));
+      const unsent = () => drafts().filter((d) => !sentIds.has(d.id));
       if (seq !== reviewSeq) {
+        const cur = pr();
+        if (cur && prKey(cur) === prKey(p)) setDrafts(unsent());
+        else storage.set(KEY_DRAFTS + prKey(p), null);
         toast(`${label} on ${prKey(p)}`, "info");
         return false;
       }
       batch(() => {
         setReviewResult({ ...r, event });
         setReviewDraft("");
+        setDrafts(unsent());
+        setCommentAt(null);
         setReviewSubmitting(false);
       });
+      if (sent.length) void loadThreads();
       toast(label, "info");
       return true;
     } catch (e) {
@@ -357,9 +471,16 @@ export function createAppStore(backend: Backend) {
       // Drop pending select() callbacks and swap timers from the previous PR.
       selectSeq++;
       const prev = pr();
-      if (!prev || prKey(prev) !== prKey(detail)) resetReview();
+      const samePr = !!prev && prKey(prev) === prKey(detail);
+      if (!samePr) resetReview();
       batch(() => {
         setPr(detail);
+        setCommentAt(null);
+        if (!samePr) {
+          threadsSeq++;
+          setThreads([]);
+          setDraftsSignal(restoreDrafts(detail));
+        }
         setViewedMap(reconcile(map));
         setViewedCount(count);
         setCollapsed(reconcile({}));
@@ -370,6 +491,7 @@ export function createAppStore(backend: Backend) {
         setPrLoading(null);
       });
       storage.set(KEY_LAST_PR, JSON.stringify(ref));
+      void loadThreads();
       const first = nextUnviewed(order(), null, (x) => !!viewed[x]) ?? order()[0];
       // Load the grammars this PR needs while the first diff is on its way (its language first).
       warmHighlighter(
@@ -438,7 +560,11 @@ export function createAppStore(backend: Backend) {
     selectSeq++;
     openSeq++;
     resetReview();
+    threadsSeq++;
     batch(() => {
+      setThreads([]);
+      setDraftsSignal([]);
+      setCommentAt(null);
       setPr(null);
       setPrLoading(null);
       setSelected(null);
@@ -465,6 +591,8 @@ export function createAppStore(backend: Backend) {
 
   function dispatch(action: Action) {
     if (prLoading() && !LOADING_ACTIONS.has(action)) return;
+    // Esc closes the comment popover, unless a dialog is open over it.
+    if (action === "escape" && commentAt() && overlay() === "none" && !pickerOpen()) return setCommentAt(null);
     const u = reduce(
       {
         order: order(),
@@ -557,6 +685,11 @@ export function createAppStore(backend: Backend) {
     reviewSubmitting,
     reviewResult,
     reviewError,
+    threads,
+    drafts,
+    commentAt,
+    threadsAt,
+    draftsAt,
     ownPr,
     tree,
     order,
@@ -585,6 +718,11 @@ export function createAppStore(backend: Backend) {
     setReviewDraft,
     submitReview,
     openReview,
+    setCommentAt,
+    addDraft,
+    updateDraft,
+    deleteDraft,
+    openUrl: (url: string) => backend.openUrl(url).catch((e) => toast(`Couldn't open browser: ${errorMessage(e)}`)),
     /** Back to an empty form after a submitted review ("write another"). */
     newReview: resetReview,
     listRepoPrs: (owner: string, repo: string) => backend.listRepoPrs(owner, repo),

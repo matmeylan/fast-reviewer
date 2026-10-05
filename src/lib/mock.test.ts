@@ -64,13 +64,37 @@ describe("mock backend", () => {
 
   it("records reviews and rejects the ones GitHub would", async () => {
     const b = createMockBackend({ latencyMs: 0 });
-    await expect(b.submitReview("acme", "web", 482, "COMMENT", "  ")).rejects.toThrow("Write a comment");
-    await expect(b.submitReview("acme", "web", 475, "APPROVE", "")).rejects.toThrow("approve your own");
-    const r = await b.submitReview("acme", "web", 482, "APPROVE", "Nice");
+    await expect(b.submitReview("acme", "web", 482, "COMMENT", "  ", [])).rejects.toThrow("Write a comment");
+    await expect(b.submitReview("acme", "web", 475, "APPROVE", "", [])).rejects.toThrow("approve your own");
+    const r = await b.submitReview("acme", "web", 482, "APPROVE", "Nice", []);
     expect(r.state).toBe("APPROVED");
     expect(b.reviews).toEqual([expect.objectContaining({ id: r.id, number: 482, event: "APPROVE", body: "Nice" })]);
     const failing = createMockBackend({ latencyMs: 0, failReview: true });
-    await expect(failing.submitReview("acme", "web", 482, "APPROVE", "")).rejects.toThrow("502");
+    await expect(failing.submitReview("acme", "web", 482, "APPROVE", "", [])).rejects.toThrow("502");
+  });
+
+  it("serves review threads and turns a review's line comments into threads", async () => {
+    const b = createMockBackend({ latencyMs: 0 });
+    const seeded = await b.listReviewThreads("acme", "web", 482);
+    expect(seeded.map((t) => [t.path, t.side, t.resolved, t.outdated])).toEqual([
+      ["api/routes/orders.py", "new", false, false],
+      ["api/routes/orders.py", "old", true, false],
+      ["api/routes/orders.py", "new", false, true],
+    ]);
+    expect(await b.listReviewThreads("acme", "api", 91)).toEqual([]);
+
+    const line = seeded[0].line!;
+    const comment = { path: "api/routes/orders.py", side: "new" as const, line, body: "Nit" };
+    // Line comments alone make a comment review; lines outside the hunks are refused, like GitHub.
+    await expect(b.submitReview("acme", "web", 482, "COMMENT", "", [{ ...comment, line: 100_000 }])).rejects.toThrow(
+      "Line could not be resolved",
+    );
+    await expect(b.submitReview("acme", "web", 482, "COMMENT", "", [{ ...comment, body: " " }])).rejects.toThrow("empty");
+    await b.submitReview("acme", "web", 482, "COMMENT", "", [comment]);
+    expect(b.reviews.at(-1)!.comments).toEqual([comment]);
+    const after = await b.listReviewThreads("acme", "web", 482);
+    expect(after).toHaveLength(4);
+    expect(after[3]).toMatchObject({ path: comment.path, side: "new", line, comments: [{ author: "octocat", body: "Nit" }] });
   });
 
   it("serves image, SVG and PDF contents consistent with their diffs", async () => {

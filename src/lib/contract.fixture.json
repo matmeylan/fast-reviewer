@@ -71,6 +71,24 @@
     "url": "https://github.com/octo/app/pull/42#pullrequestreview-80",
     "state": "APPROVED"
   },
+  "reviewThread": {
+    "id": "PRRT_kwDOAbc",
+    "path": "src/new.ts",
+    "line": 2,
+    "side": "new",
+    "resolved": false,
+    "outdated": false,
+    "comments": [
+      {
+        "id": "PRRC_kwDOAbc",
+        "author": "hubot",
+        "body": "Why `2`?",
+        "createdAt": "2026-01-02T03:04:05Z",
+        "url": "https://github.com/octo/app/pull/42#discussion_r1"
+      }
+    ]
+  },
+  "newComment": { "path": "src/new.ts", "side": "old", "line": 2, "body": "Was 2 wrong?" },
   "enums": {
     "authSource": ["env", "ghCli", "keychain"],
     "inboxReason": ["reviewRequested", "authored", "other"],

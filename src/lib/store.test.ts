@@ -544,6 +544,80 @@ describe("review submission", () => {
     dispose();
   });
 
+  it("sends draft line comments with the review, then shows them as threads", async () => {
+    const backend = createMockBackend({ latencyMs: 0 });
+    const { store, dispose } = setup(backend);
+    await openMain(store);
+    const path = "api/routes/orders.py";
+    // The mock's seeded threads; the outdated one is on no line.
+    expect(store.threads()).toHaveLength(3);
+    const open = store.threads()[0];
+    expect(store.threadsAt(path, "new", open.line!)).toEqual([open]);
+    expect(store.threadsAt(path, "new", open.line! + 1)).toEqual([]);
+    expect(store.threadsAt(path, "old", store.threads()[1].line!)).toEqual([store.threads()[1]]);
+
+    store.addDraft({ path, side: "new", line: open.line! }, "Same here");
+    store.addDraft({ path, side: "new", line: open.line! }, "  ");
+    expect(store.draftsAt(path, "new", open.line!)).toMatchObject([{ body: "Same here" }]);
+    expect(localStorage.getItem("fr.drafts.acme/web#482")).toContain("Same here");
+
+    // No body needed: the line comment is the review.
+    expect(await store.submitReview("COMMENT")).toBe(true);
+    expect(backend.reviews[0]).toMatchObject({
+      event: "COMMENT",
+      body: "",
+      comments: [{ path, side: "new", line: open.line, body: "Same here" }],
+    });
+    expect(store.drafts()).toEqual([]);
+    expect(localStorage.getItem("fr.drafts.acme/web#482")).toBeNull();
+    await tick();
+    expect(store.threadsAt(path, "new", open.line!).map((t) => t.comments[0].body)).toEqual([
+      open.comments[0].body,
+      "Same here",
+    ]);
+    dispose();
+  });
+
+  it("keeps drafts when the review fails, across restarts, and per PR", async () => {
+    const path = "api/routes/orders.py";
+    const first = setup(createMockBackend({ latencyMs: 0, failReview: true }));
+    await openMain(first.store);
+    first.store.addDraft({ path, side: "new", line: 16 }, "Rename");
+    first.store.updateDraft(first.store.drafts()[0].id, "Rename this");
+    expect(await first.store.submitReview("COMMENT")).toBe(false);
+    expect(first.store.reviewError()).toBe("GitHub API error 502: Server Error");
+    expect(first.store.drafts()).toMatchObject([{ path, side: "new", line: 16, body: "Rename this" }]);
+    await first.store.openPr({ owner: "acme", repo: "api", number: 91 });
+    expect(first.store.drafts()).toEqual([]);
+    first.dispose();
+
+    const second = setup();
+    await openMain(second.store);
+    expect(second.store.drafts()).toMatchObject([{ body: "Rename this" }]);
+    second.store.deleteDraft(second.store.drafts()[0].id);
+    expect(localStorage.getItem("fr.drafts.acme/web#482")).toBeNull();
+    second.dispose();
+  });
+
+  it("Escape closes the comment popover before anything else", async () => {
+    const { store, dispose } = setup();
+    await openMain(store);
+    store.dispatch("find");
+    store.setCommentAt({ path: "api/routes/orders.py", side: "new", line: 16, canComment: true });
+    store.dispatch("escape");
+    expect(store.commentAt()).toBeNull();
+    expect(store.findOpen()).toBe(true);
+    // A dialog over the popover closes first.
+    store.setCommentAt({ path: "api/routes/orders.py", side: "new", line: 16, canComment: true });
+    store.dispatch("writeReview");
+    store.dispatch("escape");
+    expect(store.overlay()).toBe("none");
+    expect(store.commentAt()).not.toBeNull();
+    store.dispatch("next");
+    expect(store.commentAt()).toBeNull();
+    dispose();
+  });
+
   it("opens the submitted review on GitHub and can start over", async () => {
     const backend = createMockBackend({ latencyMs: 0 });
     const open = vi.spyOn(backend, "openUrl").mockResolvedValue();

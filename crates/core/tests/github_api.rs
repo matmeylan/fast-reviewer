@@ -3,7 +3,8 @@ use std::sync::Arc;
 
 use fast_reviewer_core::auth::AuthConfig;
 use fast_reviewer_core::model::{
-    FileStatus, InboxReason, LineKind, ReviewEvent, SubmittedReview, ViewedState,
+    FileStatus, InboxReason, LineKind, NewComment, ReviewComment, ReviewEvent, ReviewThread, Side,
+    SubmittedReview, ViewedState,
 };
 use fast_reviewer_core::{Config, Error, Service};
 use serde_json::{json, Value};
@@ -520,7 +521,14 @@ async fn submit_review_pins_the_reviewed_head() {
 
     // No get_pr first: the head SHA is loaded on demand. The body is trimmed.
     let comment = svc
-        .submit_review("o", "r", 9, ReviewEvent::Comment, "  Looks good, one nit\n")
+        .submit_review(
+            "o",
+            "r",
+            9,
+            ReviewEvent::Comment,
+            "  Looks good, one nit\n",
+            &[],
+        )
         .await
         .unwrap();
     assert_eq!(
@@ -533,7 +541,7 @@ async fn submit_review_pins_the_reviewed_head() {
     );
     // Approving needs no comment.
     let approve = svc
-        .submit_review("o", "r", 9, ReviewEvent::Approve, " ")
+        .submit_review("o", "r", 9, ReviewEvent::Approve, " ", &[])
         .await
         .unwrap();
     assert_eq!((approve.id, approve.state.as_str()), (2, "APPROVED"));
@@ -559,7 +567,7 @@ async fn submit_review_surfaces_validation_errors() {
         .mount(&server)
         .await;
     let err = svc
-        .submit_review("o", "r", 9, ReviewEvent::Approve, "")
+        .submit_review("o", "r", 9, ReviewEvent::Approve, "", &[])
         .await
         .unwrap_err();
     assert_eq!(
@@ -578,11 +586,167 @@ async fn empty_comment_review_is_refused_locally() {
         .await;
     let before = server.received_requests().await.unwrap().len();
     let err = svc
-        .submit_review("o", "r", 9, ReviewEvent::Comment, " \n\t")
+        .submit_review("o", "r", 9, ReviewEvent::Comment, " \n\t", &[])
         .await
         .unwrap_err();
     assert_eq!(err.to_string(), "Write a comment before submitting");
     assert_eq!(server.received_requests().await.unwrap().len(), before);
+    server.verify().await;
+}
+
+#[tokio::test]
+async fn submit_review_sends_line_comments() {
+    let (server, svc) = setup().await;
+    mount_pr(
+        &server,
+        vec![vec![gql_file("a.ts", "MODIFIED", "VIEWED")]],
+        vec![],
+    )
+    .await;
+    Mock::given(method("POST"))
+        .and(path("/repos/o/r/pulls/9/reviews"))
+        .and(body_json(json!({
+            "commit_id": HEAD,
+            "event": "COMMENT",
+            "comments": [
+                { "path": "a.ts", "line": 3, "side": "RIGHT", "body": "Rename this" },
+                { "path": "a.ts", "line": 7, "side": "LEFT", "body": "Why remove this?" },
+            ],
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": 5,
+            "html_url": "https://github.com/o/r/pull/9#pullrequestreview-5",
+            "state": "COMMENTED",
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let comment = |side, line, body: &str| NewComment {
+        path: "a.ts".into(),
+        side,
+        line,
+        body: body.into(),
+    };
+    // Line comments alone make a comment review: no body needed.
+    let r = svc
+        .submit_review(
+            "o",
+            "r",
+            9,
+            ReviewEvent::Comment,
+            "",
+            &[
+                comment(Side::New, 3, "Rename this"),
+                comment(Side::Old, 7, "Why remove this?"),
+            ],
+        )
+        .await
+        .unwrap();
+    assert_eq!(r.id, 5);
+    server.verify().await;
+
+    let err = svc
+        .submit_review(
+            "o",
+            "r",
+            9,
+            ReviewEvent::Comment,
+            "",
+            &[comment(Side::New, 3, " \n")],
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(err.to_string(), "A line comment is empty");
+}
+
+fn gql_thread(id: &str, line: Option<u32>, side: &str, outdated: bool) -> Value {
+    json!({
+        "id": id, "path": "src/a.ts", "line": line, "diffSide": side,
+        "isResolved": id == "T2", "isOutdated": outdated,
+        "comments": { "nodes": [
+            { "id": format!("{id}c1"), "author": { "login": "hubot" }, "body": "Hmm",
+              "createdAt": "2026-01-02T03:04:05Z", "url": format!("https://github.com/o/r/pull/9#{id}c1") },
+            { "id": format!("{id}c2"), "author": null, "body": "Fixed",
+              "createdAt": "2026-01-03T03:04:05Z", "url": format!("https://github.com/o/r/pull/9#{id}c2") },
+        ]},
+    })
+}
+
+#[tokio::test]
+async fn review_threads_are_paginated_and_mapped() {
+    let (server, svc) = setup().await;
+    let page = |nodes: Vec<Value>, next: Option<&str>| {
+        json!({ "data": { "repository": { "pullRequest": { "reviewThreads": {
+            "pageInfo": { "hasNextPage": next.is_some(), "endCursor": next },
+            "nodes": nodes,
+        }}}}})
+    };
+    Mock::given(method("POST"))
+        .and(path("/graphql"))
+        .and(body_string_contains("reviewThreads"))
+        .and(body_partial_json(json!({ "variables": { "after": null } })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(page(
+            vec![gql_thread("T1", Some(4), "RIGHT", false)],
+            Some("c1"),
+        )))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/graphql"))
+        .and(body_string_contains("reviewThreads"))
+        .and(body_partial_json(json!({ "variables": { "after": "c1" } })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(page(
+            vec![
+                gql_thread("T2", Some(9), "LEFT", false),
+                gql_thread("T3", None, "RIGHT", true),
+            ],
+            None,
+        )))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let threads = svc.list_review_threads("o", "r", 9).await.unwrap();
+    let got: Vec<_> = threads
+        .iter()
+        .map(|t| (t.id.as_str(), t.line, t.side, t.resolved, t.outdated))
+        .collect();
+    assert_eq!(
+        got,
+        vec![
+            ("T1", Some(4), Side::New, false, false),
+            ("T2", Some(9), Side::Old, true, false),
+            ("T3", None, Side::New, false, true),
+        ]
+    );
+    assert_eq!(
+        threads[0],
+        ReviewThread {
+            id: "T1".into(),
+            path: "src/a.ts".into(),
+            line: Some(4),
+            side: Side::New,
+            resolved: false,
+            outdated: false,
+            comments: vec![
+                ReviewComment {
+                    id: "T1c1".into(),
+                    author: "hubot".into(),
+                    body: "Hmm".into(),
+                    created_at: "2026-01-02T03:04:05Z".into(),
+                    url: "https://github.com/o/r/pull/9#T1c1".into(),
+                },
+                ReviewComment {
+                    id: "T1c2".into(),
+                    author: "ghost".into(),
+                    body: "Fixed".into(),
+                    created_at: "2026-01-03T03:04:05Z".into(),
+                    url: "https://github.com/o/r/pull/9#T1c2".into(),
+                },
+            ],
+        }
+    );
     server.verify().await;
 }
 

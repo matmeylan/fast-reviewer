@@ -3,10 +3,12 @@
 import type {
   AuthStatus,
   FileDiff,
+  NewComment,
   PrDetail,
   PrSummary,
   RepoSummary,
   ReviewEvent,
+  ReviewThread,
   Side,
   SubmittedReview,
 } from "./types";
@@ -25,8 +27,17 @@ export interface Backend {
   /** Write one side of a file to a temp file and open it with the OS default app. */
   openFile(owner: string, repo: string, number: number, path: string, side: Side): Promise<void>;
   setFileViewed(prId: string, path: string, viewed: boolean): Promise<void>;
-  /** Review the head commit `getPr` returned. A COMMENT needs a non-empty body. */
-  submitReview(owner: string, repo: string, number: number, event: ReviewEvent, body: string): Promise<SubmittedReview>;
+  /** The PR's review comment threads, oldest first. */
+  listReviewThreads(owner: string, repo: string, number: number): Promise<ReviewThread[]>;
+  /** Review the head commit `getPr` returned, with line comments. A COMMENT needs a body or comments. */
+  submitReview(
+    owner: string,
+    repo: string,
+    number: number,
+    event: ReviewEvent,
+    body: string,
+    comments: NewComment[],
+  ): Promise<SubmittedReview>;
   openUrl(url: string): Promise<void>;
 }
 
@@ -55,8 +66,9 @@ function tauriBackend(): Backend {
       ),
     openFile: (owner, repo, number, path, side) => call("open_file", { owner, repo, number, path, side }),
     setFileViewed: (prId, path, viewed) => call("set_file_viewed", { prId, path, viewed }),
-    submitReview: (owner, repo, number, event, body) =>
-      call("submit_review", { owner, repo, number, event, body }),
+    listReviewThreads: (owner, repo, number) => call("list_review_threads", { owner, repo, number }),
+    submitReview: (owner, repo, number, event, body, comments) =>
+      call("submit_review", { owner, repo, number, event, body, comments }),
     openUrl: (url) => call("open_url", { url }),
   };
 }

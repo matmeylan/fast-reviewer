@@ -1,7 +1,8 @@
 // OWNER: diff-view agent. Contract used by the app shell:
-// <DiffView diff mode hunkNav find findNav onFindStatus /> renders one file's
-// diff, virtualized, with syntax highlighting swapped in from the highlight
-// worker when ready, find-in-file matches highlighted, and selectable code.
+// <DiffView diff mode hunkNav find findNav onFindStatus comments /> renders one
+// file's diff, virtualized, with syntax highlighting swapped in from the highlight
+// worker when ready, find-in-file matches highlighted, selectable code, and
+// clickable line numbers that open a comment popover under their line.
 import { createEffect, createMemo, createSignal, For, Match, on, onCleanup, onMount, Show, Switch, untrack, type JSX } from "solid-js";
 import type { DiffLine, FileDiff } from "../lib/types";
 import type { ThemeName } from "../lib/highlight-protocol";
@@ -42,6 +43,29 @@ export interface DiffViewProps {
   findNav?: { dir: 1 | -1; seq: number };
   /** Reports the number of find matches and the current one (-1: none yet). */
   onFindStatus?: (status: FindStatus) => void;
+  /** Review comments: line numbers become clickable and show how many comments a line has. */
+  comments?: DiffComments;
+}
+
+/** A line of one side of the file: `old` numbers are merge-base lines, `new` are head lines. */
+export interface LineRef {
+  side: Side;
+  line: number;
+}
+
+export interface DiffComments {
+  /** Threads and drafts on a line, for its gutter marker. */
+  count: (side: Side, line: number) => number;
+  /**
+   * A line number was clicked. `canComment`: the line is in one of the diff's hunks
+   * (GitHub takes comments only there); lines outside them are clickable only when
+   * they already have comments.
+   */
+  onOpen: (at: LineRef, canComment: boolean) => void;
+  /** The line whose popover is open. */
+  open: LineRef | null;
+  /** Shown under the open line, scrolling with it. */
+  popover: JSX.Element;
 }
 
 export const ROW_HEIGHT = 20;
@@ -98,6 +122,7 @@ function DiffBody(props: DiffViewProps) {
   let rowsEl!: HTMLDivElement;
   let hbar!: HTMLDivElement;
   let measure!: HTMLSpanElement;
+  let popoverEl: HTMLDivElement | undefined;
 
   const theme = () => props.theme ?? colorScheme();
   const newLines = createMemo(() => newTextLines(props.diff));
@@ -113,6 +138,27 @@ function DiffBody(props: DiffViewProps) {
     setExpState({ diff: props.diff, exp: expandGap(gaps(), expansion(), gap, dir) });
 
   const model = createMemo(() => buildRows(props.diff, props.mode, expansion(), newLines()));
+  /** Lines from the diff's hunks; expanded context lines are not in it. */
+  const hunkLines = createMemo(() => new Set(props.diff.hunks.flatMap((h) => h.lines)));
+  /** Row index of the line whose comment popover is open, or -1. */
+  const popoverRow = createMemo(() => {
+    const at = props.comments?.open;
+    if (!at) return -1;
+    const no = (l: DiffLine | null) => (l ? (at.side === "old" ? l.oldNo : l.newNo) : null);
+    return model().rows.findIndex((r) =>
+      r.t === "pair" ? no(at.side === "old" ? r.left : r.right) === at.line : r.t === "line" && no(r.line) === at.line,
+    );
+  });
+
+  // Bring a newly opened comment popover into view (it opens under the clicked line).
+  createEffect(
+    on(
+      () => props.comments?.open,
+      (at) => {
+        if (at) requestAnimationFrame(() => popoverEl?.isConnected && popoverEl.scrollIntoView?.({ block: "nearest" }));
+      },
+    ),
+  );
 
   // --- Syntax tokens ------------------------------------------------------
   // Plain text renders first; tokens stream in from the worker and swap in.
@@ -458,15 +504,37 @@ function DiffBody(props: DiffViewProps) {
   createEffect(() => props.onFindStatus?.({ count: matches().length, index: current() }));
   onCleanup(() => props.onFindStatus?.({ count: 0, index: -1 }));
 
-  const gutterCh = () => Math.max(3, String(model().maxLineNo).length) + 2;
+  // Comments add room for the gutter marker.
+  const gutterCh = () => Math.max(3, String(model().maxLineNo).length) + (props.comments ? 4 : 2);
+
+  /** A line number cell; clickable for comments when the line can take one or has some. */
+  const LineNo = (p: { line: DiffLine; side: Side }) => {
+    const no = p.side === "old" ? p.line.oldNo : p.line.newNo;
+    const c = props.comments;
+    if (!c || no == null) return <span class={`ln ${p.line.kind}`}>{no ?? ""}</span>;
+    const canComment = hunkLines().has(p.line);
+    const count = () => c.count(p.side, no);
+    const isOpen = () => c.open?.side === p.side && c.open.line === no;
+    return (
+      <span
+        class={`ln ${p.line.kind}`}
+        classList={{ cm: canComment || count() > 0, "cm-open": isOpen() }}
+        data-cmt={count() || undefined}
+        data-side={p.side}
+        title={canComment ? "Comment on this line" : count() ? "Show comments" : undefined}
+        onClick={() => (canComment || count() > 0) && c.onOpen({ side: p.side, line: no }, canComment)}
+      >
+        {no}
+      </span>
+    );
+  };
 
   const LineCell = (p: { line: DiffLine | null; side: Side }) => {
     const line = p.line;
     if (!line) return <><span class="ln fill" /><div class="dc fill" /></>;
-    const no = p.side === "old" ? line.oldNo : line.newNo;
     return (
       <>
-        <span class={`ln ${line.kind}`}>{no ?? ""}</span>
+        <LineNo line={line} side={p.side} />
         <div class={`dc ${line.kind}`} data-side={p.side}>
           <div class="dt" innerHTML={lineHtml(line, p.side)} />
         </div>
@@ -488,8 +556,8 @@ function DiffBody(props: DiffViewProps) {
         const l = row.line;
         return (
           <div class={`dr ${l.kind}`}>
-            <span class={`ln ${l.kind}`}>{l.oldNo ?? ""}</span>
-            <span class={`ln ${l.kind}`}>{l.newNo ?? ""}</span>
+            <LineNo line={l} side="old" />
+            <LineNo line={l} side="new" />
             <div class={`dc ${l.kind}`}>
               <div class="dt" innerHTML={lineHtml(l, l.kind === "del" ? "old" : "new")} />
             </div>
@@ -558,6 +626,18 @@ function DiffBody(props: DiffViewProps) {
           <div class="dv-rows" ref={rowsEl} style={{ transform: `translateY(${range().start * ROW_HEIGHT}px)` }}>
             <For each={visible()}>{(row) => <RowView row={row} />}</For>
           </div>
+          <Show when={popoverRow() >= 0 && props.comments}>
+            {(c) => (
+              <div
+                class="dv-popover"
+                classList={{ right: props.mode === "split" && c().open?.side === "new" }}
+                style={{ top: `${(popoverRow() + 1) * ROW_HEIGHT}px` }}
+                ref={popoverEl}
+              >
+                {c().popover}
+              </div>
+            )}
+          </Show>
         </div>
       </div>
       <div class="dv-hbar" ref={hbar} hidden={maxScrollX() === 0} onScroll={() => setScrollX(hbar.scrollLeft)}>
