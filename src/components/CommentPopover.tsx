@@ -38,7 +38,9 @@ export default function CommentPopover(props: { store: AppStore; target: Comment
 
   const threads = () => s.threadsAt(t.path, t.side, t.line);
   const drafts = () => s.draftsAt(t.path, t.side, t.line);
-  const [composing, setComposing] = createSignal(t.canComment && threads().length === 0 && drafts().length === 0);
+  const [composing, setComposing] = createSignal(
+    t.canComment && (!!t.compose || (threads().length === 0 && drafts().length === 0)),
+  );
   const [text, setText] = createSignal("");
   const [editing, setEditing] = createSignal<{ id: number; text: string } | null>(null);
 

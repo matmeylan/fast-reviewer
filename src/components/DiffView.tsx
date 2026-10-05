@@ -57,11 +57,13 @@ export interface DiffComments {
   /** Threads and drafts on a line, for its gutter marker. */
   count: (side: Side, line: number) => number;
   /**
-   * A line number was clicked. `canComment`: the line is in one of the diff's hunks
-   * (GitHub takes comments only there); lines outside them are clickable only when
-   * they already have comments.
+   * A line number was clicked (`how: "click"`), or `c` was pressed with the mouse over
+   * the line (`"key"`). `canComment`: the line is in one of the diff's hunks (GitHub
+   * takes comments only there); other lines open only when they already have comments.
    */
-  onOpen: (at: LineRef, canComment: boolean) => void;
+  onOpen: (at: LineRef, canComment: boolean, how: "click" | "key") => void;
+  /** Incremented to open the line under the mouse (the `c` shortcut). */
+  request?: number;
   /** The line whose popover is open. */
   open: LineRef | null;
   /** Shown under the open line, scrolling with it. */
@@ -149,6 +151,47 @@ function DiffBody(props: DiffViewProps) {
       r.t === "pair" ? no(at.side === "old" ? r.left : r.right) === at.line : r.t === "line" && no(r.line) === at.line,
     );
   });
+
+  // The `c` shortcut opens the line under the mouse. The pointer position is kept rather
+  // than the hovered line, so a line scrolled under a still mouse counts too.
+  let pointer: { x: number; y: number } | null = null;
+  const onPointerMove = (e: PointerEvent) => (pointer = { x: e.clientX, y: e.clientY });
+
+  /** The line under the pointer: the side it is on, and its diff line. */
+  const lineUnderPointer = (): { at: LineRef; line: DiffLine } | null => {
+    const el = pointer && document.elementFromPoint?.(pointer.x, pointer.y);
+    if (!el || el.closest(".dv-popover")) return null;
+    const row = untrack(model).rows[rowOf(el)];
+    if (!row || row.t === "hunk") return null;
+    // Split: the half under the pointer. Unified: its line number's side, else the line's own.
+    const side = el.closest("[data-side]")?.getAttribute("data-side") as Side | null;
+    let line: DiffLine | null;
+    let s: Side;
+    if (row.t === "pair") {
+      if (!side) return null;
+      s = side;
+      line = side === "old" ? row.left : row.right;
+    } else {
+      line = row.line;
+      s = side ?? (line.kind === "del" ? "old" : "new");
+    }
+    const no = line && (s === "old" ? line.oldNo : line.newNo);
+    return line && no != null ? { at: { side: s, line: no }, line } : null;
+  };
+
+  createEffect(
+    on(
+      () => props.comments?.request,
+      () => {
+        const c = props.comments;
+        const hit = c && lineUnderPointer();
+        if (!c || !hit) return;
+        const canComment = untrack(hunkLines).has(hit.line);
+        if (canComment || c.count(hit.at.side, hit.at.line) > 0) c.onOpen(hit.at, canComment, "key");
+      },
+      { defer: true },
+    ),
+  );
 
   // Bring a newly opened comment popover into view (it opens under the clicked line).
   createEffect(
@@ -522,7 +565,7 @@ function DiffBody(props: DiffViewProps) {
         data-cmt={count() || undefined}
         data-side={p.side}
         title={canComment ? "Comment on this line" : count() ? "Show comments" : undefined}
-        onClick={() => (canComment || count() > 0) && c.onOpen({ side: p.side, line: no }, canComment)}
+        onClick={() => (canComment || count() > 0) && c.onOpen({ side: p.side, line: no }, canComment, "click")}
       >
         {no}
       </span>
@@ -621,6 +664,8 @@ function DiffBody(props: DiffViewProps) {
         ref={scroller}
         onScroll={() => setScrollTop(scroller.scrollTop)}
         onMouseDown={onMouseDown}
+        onPointerMove={onPointerMove}
+        onPointerLeave={() => (pointer = null)}
       >
         <div class="dv-spacer" style={{ height: `${model().rows.length * ROW_HEIGHT}px` }}>
           <div class="dv-rows" ref={rowsEl} style={{ transform: `translateY(${range().start * ROW_HEIGHT}px)` }}>

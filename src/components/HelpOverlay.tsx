@@ -17,6 +17,7 @@ const SHORTCUTS: [string[], string][] = [
   [["/"], "Filter files"],
   [[isMac ? "⌘F" : "Ctrl+F"], "Find in file"],
   [[isMac ? "⌘G" : "Ctrl+G", isMac ? "⇧⌘G" : "Shift+Ctrl+G"], "Next / previous match"],
+  [["c"], "Comment on the line under the mouse"],
   [["a"], "Comment or approve"],
   [["o"], "Open PR in browser"],
   [[isMac ? "⌘K" : "Ctrl+K"], "Open pull request"],

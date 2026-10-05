@@ -540,3 +540,31 @@ test("closing a comment box keeps the text as a draft; drafts can be edited and 
   await page.keyboard.press("Escape");
   await expect(line).not.toHaveAttribute("data-cmt");
 });
+
+test("c comments on the line under the mouse", async ({ page }) => {
+  await openMainPr(page);
+  const popover = page.getByTestId("comment-popover");
+  // Over the code of an added line (not its line number), in the new half.
+  const added = page.locator(".dc.add .dt").first();
+  await added.hover();
+  await page.keyboard.press("c");
+  await expect(popover.getByTestId("comment-body")).toBeFocused();
+  // c typed into the box is text, not a shortcut.
+  await page.keyboard.type("cc");
+  await expect(popover.getByTestId("comment-body")).toHaveValue("cc");
+  await page.keyboard.press("Control+Enter");
+  await page.keyboard.press("Escape");
+  await expect(popover).toBeHidden();
+
+  // A line that already has a thread opens with the box ready too.
+  await page.locator('.ln[data-cmt][data-side="new"]').first().hover();
+  await page.keyboard.press("c");
+  await expect(popover.getByTestId("comment-thread").first()).toBeVisible();
+  await expect(popover.getByTestId("comment-body")).toBeFocused();
+  await page.keyboard.press("Escape");
+
+  // Nothing happens with the mouse outside the diff.
+  await page.getByTestId("current-path").hover();
+  await page.keyboard.press("c");
+  await expect(popover).toBeHidden();
+});

@@ -198,10 +198,17 @@ export default function MainPane(props: { store: AppStore }) {
               // Built once: DiffView reads it often, and the popover must not be recreated.
               const comments: DiffComments = {
                 count: (side, line) => s.threadsAt(d().path, side, line).length + s.draftsAt(d().path, side, line).length,
-                onOpen: (at, canComment) => {
+                onOpen: (at, canComment, how) => {
                   const cur = s.commentAt();
                   const same = cur?.path === d().path && cur.side === at.side && cur.line === at.line;
-                  s.setCommentAt(same ? null : { path: d().path, ...at, canComment });
+                  const compose = how === "key";
+                  if (!same) s.setCommentAt({ path: d().path, ...at, canComment, compose });
+                  // A click on the open line closes it; `c` there brings up the comment box.
+                  else if (!compose) s.setCommentAt(null);
+                  else if (!cur.compose) s.setCommentAt({ ...cur, compose });
+                },
+                get request() {
+                  return s.commentLineReq();
                 },
                 get open() {
                   const c = s.commentAt();

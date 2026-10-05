@@ -167,6 +167,76 @@ describe("DiffView", () => {
     expect(opened[2]).toEqual([{ side: "new", line: 30 }, false]);
   });
 
+  it("c opens the line under the mouse: its side in split, its own side in unified", () => {
+    const diff: FileDiff = {
+      ...base,
+      hunks: [
+        {
+          oldStart: 1, oldLines: 2, newStart: 1, newLines: 2,
+          lines: [
+            { kind: "context", oldNo: 1, newNo: 1, text: "same", segments: null },
+            { kind: "del", oldNo: 2, newNo: null, text: "old", segments: null },
+            { kind: "add", oldNo: null, newNo: 2, text: "new", segments: null },
+          ],
+        },
+      ],
+    };
+    const opened: [LineRef, boolean, string][] = [];
+    const [request, setRequest] = createSignal(0);
+    const [mode, setMode] = createSignal<"split" | "unified">("split");
+    const comments: DiffComments = {
+      count: () => 0,
+      onOpen: (at, canComment, how) => opened.push([at, canComment, how]),
+      open: null,
+      popover: null,
+      get request() {
+        return request();
+      },
+    };
+    const { container } = render(() => <DiffView diff={diff} mode={mode()} comments={comments} />);
+    const scroller = container.querySelector<HTMLElement>(".dv-scroll")!;
+    // jsdom has no layout: the element "under the mouse" is picked by the test.
+    let under: Element | null = null;
+    const orig = document.elementFromPoint;
+    document.elementFromPoint = () => under;
+    const press = (el: Element | null) => {
+      under = el;
+      scroller.dispatchEvent(new MouseEvent("pointermove", { clientX: 1, clientY: 1, bubbles: true }));
+      setRequest((n) => n + 1);
+    };
+    try {
+      const code = (text: string, side?: string) =>
+        [...container.querySelectorAll(`.dc${side ? `[data-side="${side}"]` : ""} .dt`)].find((e) => e.textContent === text)!;
+      press(code("new", "new"));
+      press(code("old", "old"));
+      press(code("same", "old"));
+      // Nothing on the hunk header or the empty half of a pair.
+      press(container.querySelector(".dh"));
+      press(container.querySelector(".dc.fill"));
+      expect(opened).toEqual([
+        [{ side: "new", line: 2 }, true, "key"],
+        [{ side: "old", line: 2 }, true, "key"],
+        [{ side: "old", line: 1 }, true, "key"],
+      ]);
+      opened.length = 0;
+      setMode("unified");
+      press(code("old"));
+      press(code("same"));
+      press(container.querySelectorAll('.dr .ln[data-side="old"]')[0]);
+      expect(opened.map(([at]) => at)).toEqual([
+        { side: "old", line: 2 },
+        { side: "new", line: 1 },
+        { side: "old", line: 1 },
+      ]);
+      // After the mouse leaves the diff, c does nothing.
+      scroller.dispatchEvent(new MouseEvent("pointerleave"));
+      setRequest((n) => n + 1);
+      expect(opened).toHaveLength(3);
+    } finally {
+      document.elementFromPoint = orig;
+    }
+  });
+
   it("virtualizes a 5000-line diff and switches modes quickly", () => {
     const diff = bigDiff(5000);
     const t0 = performance.now();

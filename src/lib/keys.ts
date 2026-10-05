@@ -18,7 +18,8 @@ export type Action =
   | "focusFilter"
   | "find"
   | "findNext"
-  | "findPrev";
+  | "findPrev"
+  | "commentLine";
 
 export type Mode = "split" | "unified";
 export type Overlay = "none" | "picker" | "help" | "review";
@@ -44,6 +45,7 @@ const PLAIN_KEYS: Record<string, Action> = {
   p: "prevHunk",
   o: "openBrowser",
   a: "writeReview",
+  c: "commentLine",
   "?": "help",
   "/": "focusFilter",
 };
@@ -99,7 +101,8 @@ export type Effect =
   | { type: "openBrowser" }
   | { type: "focusFilter" }
   | { type: "focusFind" }
-  | { type: "findNav"; dir: 1 | -1 };
+  | { type: "findNav"; dir: 1 | -1 }
+  | { type: "commentLine" };
 
 export interface Update {
   current?: string | null;
@@ -195,6 +198,8 @@ export function reduce(s: NavState, action: Action): Update {
       return { effects: [{ type: "openBrowser" }] };
     case "writeReview":
       return { overlay: "review", effects: [] };
+    case "commentLine":
+      return { effects: [{ type: "commentLine" }] };
     case "focusFilter":
       return { effects: [{ type: "focusFilter" }] };
     case "find":

@@ -47,6 +47,7 @@ A native desktop app (macOS first, Linux later) for reviewing GitHub pull reques
 | `⌘K` / `Ctrl+K` | Open PR picker |
 | `⌘F` / `Ctrl+F` | Find in file |
 | `⌘G` / `⇧⌘G` | Next / previous find match |
+| `c` | Comment on the line under the mouse (opens its popover with the comment box focused) |
 | `a` | Review dialog: comment or approve (`⌘Enter` comments) |
 | `o` | Open the PR in the browser |
 | `?` | Shortcut help |

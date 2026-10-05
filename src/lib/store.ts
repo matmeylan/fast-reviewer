@@ -51,6 +51,8 @@ export interface CommentTarget {
   line: number;
   /** The line is in one of the diff's hunks, so GitHub takes comments on it. */
   canComment: boolean;
+  /** Open with the comment box focused, even when the line already has comments (`c`). */
+  compose?: boolean;
 }
 
 export interface Toast {
@@ -139,6 +141,8 @@ export function createAppStore(backend: Backend) {
   const [threads, setThreads] = createSignal<ReviewThread[]>([]);
   const [drafts, setDraftsSignal] = createSignal<DraftComment[]>([]);
   const [commentAt, setCommentAt] = createSignal<CommentTarget | null>(null);
+  /** Incremented by `c`: the diff opens a comment on the line under the mouse. */
+  const [commentLineReq, setCommentLineReq] = createSignal(0);
 
   const fullTree = createMemo<DirNode | null>(() => {
     const p = pr();
@@ -621,6 +625,7 @@ export function createAppStore(backend: Backend) {
           if (p) backend.openUrl(p.url).catch((err) => toast(`Couldn't open browser: ${errorMessage(err)}`));
         } else if (e.type === "focusFilter") setFocusFilterSeq((n) => n + 1);
         else if (e.type === "focusFind") setFocusFindSeq((n) => n + 1);
+        else if (e.type === "commentLine") setCommentLineReq((n) => n + 1);
         else if (e.type === "findNav") {
           const dir = e.dir;
           setFindNav((f) => ({ dir, seq: (f?.seq ?? 0) + 1 }));
@@ -688,6 +693,7 @@ export function createAppStore(backend: Backend) {
     threads,
     drafts,
     commentAt,
+    commentLineReq,
     threadsAt,
     draftsAt,
     ownPr,
