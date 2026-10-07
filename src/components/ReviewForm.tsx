@@ -7,9 +7,9 @@ import ExternalLink from "lucide-solid/icons/external-link";
 import MessageSquare from "lucide-solid/icons/message-square";
 import { Button } from "./ui/button";
 import { DialogContent, DialogDescription, DialogHeader, DialogOverlay, DialogTitle } from "./ui/dialog";
+import { EmojiTextarea } from "./EmojiTextarea";
 import { Kbd } from "./ui/kbd";
 import { Spinner } from "./ui/spinner";
-import { Textarea } from "./ui/textarea";
 
 const isMac = typeof navigator !== "undefined" && /Mac/.test(navigator.platform);
 
@@ -53,7 +53,7 @@ export default function ReviewForm(props: { store: AppStore; autofocus?: boolean
       when={s.reviewResult()}
       fallback={
         <div class="flex w-full flex-col gap-2 text-left text-wrap" data-testid="review-form">
-          <Textarea
+          <EmojiTextarea
             ref={textarea}
             class="max-h-64 min-h-24 resize-none select-text"
             placeholder="Leave a comment"

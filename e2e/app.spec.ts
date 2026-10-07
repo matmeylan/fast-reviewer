@@ -568,3 +568,44 @@ test("c comments on the line under the mouse", async ({ page }) => {
   await page.keyboard.press("c");
   await expect(popover).toBeHidden();
 });
+
+test("typing :shortcode in a comment suggests emoji", async ({ page }) => {
+  await openMainPr(page);
+  const popover = page.getByTestId("comment-popover");
+  const menu = page.getByTestId("emoji-menu");
+  await page.locator('.ln.cm:not([data-cmt])[data-side="new"]').first().click();
+  const body = popover.getByTestId("comment-body");
+  await page.keyboard.type("ship it :tad");
+  await expect(menu.getByTestId("emoji-option").first()).toHaveText("🎉:tada:");
+  // Under the line being typed, not over it.
+  const [boxTop, menuTop] = await Promise.all([body.boundingBox(), menu.boundingBox()]);
+  expect(menuTop!.y).toBeGreaterThan(boxTop!.y);
+  // Esc closes only the suggestions; Enter picks one.
+  await page.keyboard.press("Escape");
+  await expect(menu).toBeHidden();
+  await expect(popover).toBeVisible();
+  await page.keyboard.type("a");
+  await expect(menu).toBeVisible();
+  await page.keyboard.press("Enter");
+  await expect(body).toHaveValue("ship it 🎉 ");
+  // A click on a suggestion picks it and keeps the popover open.
+  await page.keyboard.type("so :rocke");
+  await menu.getByTestId("emoji-option").first().click();
+  await expect(body).toHaveValue("ship it 🎉 so 🚀 ");
+  await expect(body).toBeFocused();
+  // A closed shortcode converts as it's typed, and Cmd/Ctrl+Z brings the text back.
+  await page.keyboard.type(":+1:");
+  await expect(body).toHaveValue("ship it 🎉 so 🚀 👍");
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect(body).toHaveValue("ship it 🎉 so 🚀 :+1:");
+
+  // The review box has it too.
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("a");
+  const dialog = page.getByTestId("review-dialog");
+  await dialog.getByTestId("review-body").click();
+  await page.keyboard.type("lgtm :eyes");
+  await page.keyboard.press("Tab");
+  await expect(dialog.getByTestId("review-body")).toHaveValue("lgtm 👀 ");
+  await expect(dialog).toBeVisible();
+});
