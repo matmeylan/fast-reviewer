@@ -7,8 +7,8 @@ import Trash from "lucide-solid/icons/trash";
 import X from "lucide-solid/icons/x";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
+import { EMOJI_MENU_ATTR, EmojiTextarea } from "./EmojiTextarea";
 import { Kbd } from "./ui/kbd";
-import { Textarea } from "./ui/textarea";
 
 const isMac = typeof navigator !== "undefined" && /Mac/.test(navigator.platform);
 
@@ -72,10 +72,11 @@ export default function CommentPopover(props: { store: AppStore; target: Comment
   onMount(() => {
     if (composing()) composer?.focus();
     // A click outside closes the popover; line numbers are left to the diff, which
-    // moves the popover to (or closes it on) the clicked line.
+    // moves the popover to (or closes it on) the clicked line. The emoji suggestions
+    // are rendered outside it.
     const onPointerDown = (e: PointerEvent) => {
       const el = e.target as Element | null;
-      if (!el || root.contains(el) || el.closest?.(".ln.cm")) return;
+      if (!el || root.contains(el) || el.closest?.(`.ln.cm, [${EMOJI_MENU_ATTR}]`)) return;
       close();
     };
     document.addEventListener("pointerdown", onPointerDown, true);
@@ -121,7 +122,7 @@ export default function CommentPopover(props: { store: AppStore; target: Comment
               fallback={<Draft draft={d} onEdit={() => setEditing({ id: d.id, text: d.body })} onDelete={() => s.deleteDraft(d.id)} />}
             >
               <div class="flex flex-col gap-2 border-b p-3 dark:border-input">
-                <Textarea
+                <EmojiTextarea
                   ref={(el) => queueMicrotask(() => el.focus())}
                   class="max-h-48 min-h-16 resize-none select-text"
                   aria-label="Edit draft comment"
@@ -164,7 +165,7 @@ export default function CommentPopover(props: { store: AppStore; target: Comment
           }
         >
           <div class="flex flex-none flex-col gap-2 p-3">
-            <Textarea
+            <EmojiTextarea
               ref={composer}
               class="max-h-48 min-h-16 resize-none select-text"
               placeholder="Leave a comment"

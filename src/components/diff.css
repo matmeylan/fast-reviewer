@@ -232,11 +232,13 @@
   font-weight: 600;
   line-height: 1;
 }
+/* A drawn plus: the "+" glyph sits off-centre in the badge, by a different amount per font. */
 .ln.cm:not([data-cmt]):hover::before {
-  content: "+";
-  font-size: 13px;
-  background: var(--primary);
-  color: var(--primary-foreground);
+  content: "";
+  background:
+    linear-gradient(var(--primary-foreground) 0 0) center / 8px 2px no-repeat,
+    linear-gradient(var(--primary-foreground) 0 0) center / 2px 8px no-repeat,
+    var(--primary);
 }
 .ln.cm[data-cmt]::before {
   content: attr(data-cmt);
