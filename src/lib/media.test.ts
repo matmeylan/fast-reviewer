@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatBytes, imageMime, isImage, isSvg } from "./media";
+import { formatBytes, imageMime, isImage, isSvg, standaloneSvg } from "./media";
 
 describe("imageMime", () => {
   it("recognizes image extensions, ignoring case", () => {
@@ -28,6 +28,40 @@ describe("imageMime", () => {
     expect(isImage("a.pdf")).toBe(false);
     expect(isSvg("icons/a.SVG")).toBe(true);
     expect(isSvg("a.png")).toBe(false);
+  });
+});
+
+describe("standaloneSvg", () => {
+  const bytes = (s: string) => new TextEncoder().encode(s);
+  const repaired = (s: string) => {
+    const out = standaloneSvg(bytes(s));
+    return out && new TextDecoder().decode(out);
+  };
+
+  it("leaves SVGs that are valid XML alone", () => {
+    expect(repaired('<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><rect/></svg>')).toBeNull();
+    const prolog = '\ufeff<?xml version="1.0"?>\n<!-- logo -->\n<svg xmlns="http://www.w3.org/2000/svg"/>';
+    expect(repaired(prolog)).toBeNull();
+  });
+
+  it("rewrites SVGs that only work inline in HTML as XML", () => {
+    const noXmlns = repaired('<svg width="8" height="8"><rect width="8" height="8"/></svg>')!;
+    expect(noXmlns).toContain('xmlns="http://www.w3.org/2000/svg"');
+    expect(noXmlns).toContain('<rect width="8" height="8"');
+
+    const xlink = repaired('<svg xmlns="http://www.w3.org/2000/svg"><use xlink:href="#a"/></svg>')!;
+    const use = new DOMParser().parseFromString(xlink, "image/svg+xml").querySelector("use")!;
+    expect(use.getAttributeNS("http://www.w3.org/1999/xlink", "href")).toBe("#a");
+
+    expect(repaired('<svg xmlns="http://www.w3.org/2000/svg"><text>a&nbsp;b</text></svg>')).toContain("a\u00a0b");
+
+    // Every rewrite is itself valid, so it's left alone the second time.
+    for (const out of [noXmlns, xlink]) expect(repaired(out)).toBeNull();
+  });
+
+  it("gives up on files with no <svg>", () => {
+    expect(repaired("not an image")).toBeNull();
+    expect(repaired("")).toBeNull();
   });
 });
 

@@ -28,6 +28,25 @@ export const isImage = (path: string): boolean => imageMime(path) !== null;
 /** SVGs are text too, so they also have a source diff. */
 export const isSvg = (path: string): boolean => extension(path) === "svg";
 
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+/**
+ * SVG bytes an <img> can show, or null if `bytes` already work as they are (or hold no <svg>).
+ * An <img> reads SVG as strict XML, but many SVGs in the wild only work inline in HTML: no
+ * `xmlns`, an undeclared `xlink:` prefix, HTML entities like `&nbsp;`. Those are re-read with the
+ * lenient HTML parser and written back as XML. Neither parser runs scripts or loads anything.
+ */
+export function standaloneSvg(bytes: Uint8Array): Uint8Array<ArrayBuffer> | null {
+  const text = new TextDecoder().decode(bytes);
+  const xml = new DOMParser().parseFromString(text, "image/svg+xml");
+  const root = xml.documentElement;
+  const valid =
+    root.namespaceURI === SVG_NS && root.localName === "svg" && xml.getElementsByTagName("parsererror").length === 0;
+  if (valid) return null;
+  const svg = new DOMParser().parseFromString(text, "text/html").querySelector("svg");
+  return svg ? new TextEncoder().encode(new XMLSerializer().serializeToString(svg)) : null;
+}
+
 /** Human file size: "512 B", "1.5 KB", "12 MB" (1 KB = 1024 B). */
 export function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;

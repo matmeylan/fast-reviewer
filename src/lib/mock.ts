@@ -600,7 +600,8 @@ const ICON_SVG_OLD = `<svg xmlns="http://www.w3.org/2000/svg" width="64" height=
 </svg>
 `;
 
-const ICON_SVG_NEW = `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+// Written for inline use in HTML (no xmlns), as many SVGs are: an <img> can't show it as is.
+const ICON_SVG_NEW = `<svg width="64" height="64" viewBox="0 0 64 64">
   <rect x="4" y="4" width="56" height="56" rx="14" fill="#ea580c"/>
   <path d="M24 20l14 12-14 12" fill="none" stroke="#fff" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>
