@@ -3,7 +3,7 @@
 import { createEffect, createSignal, For, Match, onCleanup, Show, Switch } from "solid-js";
 import TriangleAlert from "lucide-solid/icons/triangle-alert";
 import type { FileStatus, Side } from "../lib/types";
-import { formatBytes, imageMime } from "../lib/media";
+import { formatBytes, imageMime, isSvg, standaloneSvg } from "../lib/media";
 import { errorMessage } from "../lib/store";
 import type { DiffMode } from "./DiffView";
 import { OpenButton, sidesOf, type OpenSide } from "./OpenFile";
@@ -51,7 +51,8 @@ function ImagePanel(props: { side: Side; path: string; load: ImageDiffProps["loa
     props.load(side).then(
       (bytes) => {
         if (!live) return;
-        url = URL.createObjectURL(new Blob([bytes], { type: imageMime(path) ?? "" }));
+        const shown = (isSvg(path) && standaloneSvg(bytes)) || bytes;
+        url = URL.createObjectURL(new Blob([shown], { type: imageMime(path) ?? "" }));
         setImg({ state: "ready", url, size: bytes.byteLength });
       },
       (e) => {
